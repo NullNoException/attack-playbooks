@@ -12,6 +12,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 ## Playbook Categories
 
 ### 1. Reconnaissance & Information Gathering (Playbooks 1-5)
+
 - Web Application Fingerprinting
 - Directory and File Discovery
 - Technology Stack Identification
@@ -19,6 +20,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 - Social Engineering Reconnaissance
 
 ### 2. Authentication & Session Management (Playbooks 6-10)
+
 - Brute Force Attacks
 - Session Hijacking
 - Password Reset Vulnerabilities
@@ -26,6 +28,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 - JWT Token Exploitation
 
 ### 3. Injection Attacks (Playbooks 11-15)
+
 - SQL Injection
 - NoSQL Injection
 - Command Injection
@@ -33,6 +36,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 - XPath Injection
 
 ### 4. Cross-Site Scripting (XSS) (Playbooks 16-20)
+
 - Reflected XSS
 - Stored XSS
 - DOM-based XSS
@@ -40,6 +44,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 - XSS to RCE
 
 ### 5. Business Logic & Advanced Attacks (Playbooks 21-25)
+
 - Business Logic Flaws
 - Race Conditions
 - File Upload Vulnerabilities
@@ -47,6 +52,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 - Insecure Direct Object References
 
 ### 6. Advanced Exploitation & Post-Exploitation (Playbooks 26-30)
+
 - Remote Code Execution
 - Privilege Escalation
 - Data Exfiltration
@@ -56,6 +62,7 @@ A comprehensive collection of 30 penetration testing playbooks designed for vari
 ## Usage Instructions
 
 Each playbook contains:
+
 - **Objective**: Clear description of the attack goal
 - **Prerequisites**: Required tools and setup
 - **Manual Commands**: Step-by-step command execution
