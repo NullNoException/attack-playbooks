@@ -215,49 +215,125 @@ if __name__ == "__main__":
         print("\n" + "="*70 + "\n")
 ```
 
-## Shell Script Automation
+## Attack Detection and Monitoring
+
+### Wireshark Detection Signatures
+
+```
+# HTTP fingerprinting detection filters
+http.request.method == "HEAD" and http.request.uri contains "robots.txt"
+http.request.method == "OPTIONS"
+http.user_agent contains "whatweb" or http.user_agent contains "nmap"
+http.request.uri contains "/sitemap.xml" or http.request.uri contains "/crossdomain.xml"
+
+# Multiple rapid requests pattern
+frame.time_delta < 0.1 and http.request.method == "GET"
+
+# Technology enumeration patterns
+http.request.uri matches "\\.(php|asp|aspx|jsp|do)$"
+http.response.code == 404 and frame.time_delta < 1
+```
+
+**Wireshark Analysis Steps:**
+
+1. Capture traffic during reconnaissance phase
+2. Filter for HTTP HEAD requests and technology-specific file extensions
+3. Look for rapid-fire requests indicating automated scanning
+4. Monitor User-Agent strings for reconnaissance tools
+
+### Splunk Detection Queries
+
+```spl
+# Web application fingerprinting detection
+index=web_logs sourcetype=access_combined
+| search (uri_path="/robots.txt" OR uri_path="/sitemap.xml" OR uri_path="crossdomain.xml")
+| stats count by src_ip, user_agent
+| where count > 5
+
+# Technology enumeration detection
+index=web_logs sourcetype=access_combined
+| search uri_path="*.php" OR uri_path="*.jsp" OR uri_path="*.asp"
+| eval tech_enum=case(
+    match(uri_path, "\.php$"), "PHP_scan",
+    match(uri_path, "\.jsp$"), "Java_scan",
+    match(uri_path, "\.asp$"), "ASP_scan"
+)
+| stats count by src_ip, tech_enum
+| where count > 10
+
+# Automated tool detection by User-Agent
+index=web_logs sourcetype=access_combined
+| search user_agent="*nmap*" OR user_agent="*whatweb*" OR user_agent="*gobuster*"
+| stats count by src_ip, user_agent
+| sort -count
+
+# Rapid request pattern detection
+index=web_logs sourcetype=access_combined
+| bucket _time span=10s
+| stats count by _time, src_ip
+| where count > 50
+| sort -_time
+```
+
+### SIEM Alert Rules
+
+```yaml
+# ELK Stack Detection Rule
+- rule:
+    name: "Web Application Fingerprinting"
+    condition: >
+      (http.request.uri.path in ["/robots.txt", "/sitemap.xml", "/crossdomain.xml"]) or
+      (http.user_agent contains ["nmap", "whatweb", "wappalyzer"]) or
+      (http.response.status_code == 404 and event.rate > 10/minute)
+    severity: medium
+    tags: ["reconnaissance", "fingerprinting"]
+
+# QRadar AQL Query
+SELECT sourceip, "User-Agent", COUNT(*) as request_count
+FROM events
+WHERE "User-Agent" ILIKE '%nmap%' OR "User-Agent" ILIKE '%whatweb%'
+GROUP BY sourceip, "User-Agent"
+HAVING COUNT(*) > 5
+LAST 1 HOURS
+```
+
+### Security Tools Detection
+
+**Suricata Rules:**
+
+```
+alert http any any -> any any (msg:"Web Application Fingerprinting - robots.txt"; flow:established,to_server; http_uri; content:"/robots.txt"; nocase; sid:1001001;)
+alert http any any -> any any (msg:"Web Application Fingerprinting - Technology Scan"; flow:established,to_server; http_user_agent; content:"whatweb"; nocase; sid:1001002;)
+alert http any any -> any any (msg:"Web Application Fingerprinting - Nmap NSE"; flow:established,to_server; http_user_agent; content:"nmap"; nocase; sid:1001003;)
+```
+
+**Snort Rules:**
+
+```
+alert tcp any any -> any 80 (msg:"HTTP fingerprinting attempt"; flow:established,to_server; content:"HEAD"; http_method; content:"User-Agent|3A| Mozilla"; http_header; reference:url,attack.mitre.org/T1595; sid:1001004;)
+```
+
+### Network Monitoring Indicators
+
+**Key Metrics to Monitor:**
+
+- **Request Rate**: > 10 requests/second to common files
+- **404 Error Rate**: High 404 responses in short time window
+- **User-Agent Patterns**: Known reconnaissance tool signatures
+- **URI Patterns**: Requests to technology-specific files (.php, .jsp, .asp)
+- **Response Time Analysis**: Consistent timing may indicate automated tools
+
+**Log Analysis Commands:**
 
 ```bash
-#!/bin/bash
-# Web Application Fingerprinting Script
+# Apache/Nginx log analysis for fingerprinting
+grep -E "(robots\.txt|sitemap\.xml|\.php|\.jsp|\.asp)" access.log | awk '{print $1}' | sort | uniq -c | sort -nr
 
-TARGET_IP="$1"
-OUTPUT_DIR="fingerprint_results"
+# Failed request analysis
+grep " 404 " access.log | awk '{print $1, $7}' | sort | uniq -c | sort -nr | head -20
 
-if [ -z "$TARGET_IP" ]; then
-    echo "Usage: $0 <target_ip>"
-    exit 1
-fi
-
-mkdir -p "$OUTPUT_DIR"
-
-echo "[+] Starting Web Application Fingerprinting for $TARGET_IP"
-
-# Port scanning
-echo "[+] Port scanning..."
-nmap -sV -p 80,443,8080,3000,8443 "$TARGET_IP" > "$OUTPUT_DIR/port_scan.txt"
-
-# Web technology detection
-echo "[+] Technology detection..."
-whatweb "http://$TARGET_IP" > "$OUTPUT_DIR/whatweb.txt" 2>/dev/null
-whatweb "http://$TARGET_IP:3000" >> "$OUTPUT_DIR/whatweb.txt" 2>/dev/null
-whatweb "http://$TARGET_IP:8080" >> "$OUTPUT_DIR/whatweb.txt" 2>/dev/null
-
-# HTTP headers
-echo "[+] Gathering HTTP headers..."
-curl -I "http://$TARGET_IP" > "$OUTPUT_DIR/headers_80.txt" 2>/dev/null
-curl -I "http://$TARGET_IP:3000" > "$OUTPUT_DIR/headers_3000.txt" 2>/dev/null
-curl -I "http://$TARGET_IP:8080" > "$OUTPUT_DIR/headers_8080.txt" 2>/dev/null
-
-# Common files
-echo "[+] Checking common files..."
-for file in robots.txt sitemap.xml crossdomain.xml; do
-    curl -s "http://$TARGET_IP/$file" -o "$OUTPUT_DIR/$file" 2>/dev/null
-    curl -s "http://$TARGET_IP:3000/$file" -o "$OUTPUT_DIR/${file}_3000" 2>/dev/null
-    curl -s "http://$TARGET_IP:8080/$file" -o "$OUTPUT_DIR/${file}_8080" 2>/dev/null
-done
-
-echo "[+] Results saved in $OUTPUT_DIR/"
+# User-Agent analysis for known tools
+grep -E "(nmap|whatweb|wappalyzer|gobuster)" access.log | awk -F'"' '{print $6}' | sort | uniq -c
 ```
 
 ## Detection Methods
