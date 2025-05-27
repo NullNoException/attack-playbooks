@@ -543,97 +543,707 @@ if __name__ == "__main__":
     print(f"Attack vectors identified: {len(report['attack_vectors'])}")
 ```
 
-## Shell Script Automation
+## Attack Detection and Monitoring
+
+### Wireshark Detection Signatures
+
+**OSINT and Social Engineering Reconnaissance Detection:**
+
+```wireshark
+# Email harvesting detection
+http.request.uri contains "theharvester" or http.user_agent contains "theHarvester"
+
+# Google dorking patterns
+http.request.uri contains "site:" and (http.request.uri contains "filetype:" or http.request.uri contains "inurl:")
+
+# WHOIS lookup detection
+dns.qry.name contains "whois" or tcp.dstport == 43
+
+# Social media reconnaissance
+http.host contains "linkedin.com" or http.host contains "facebook.com" or http.host contains "twitter.com"
+and http.request.uri contains "search"
+
+# GitHub/Pastebin intelligence gathering
+http.host contains "github.com" or http.host contains "pastebin.com"
+and http.request.uri contains "search"
+
+# Certificate transparency reconnaissance
+http.host contains "crt.sh" or http.host contains "censys.io"
+
+# Breach database searches
+http.host contains "haveibeenpwned.com" or http.host contains "dehashed.com"
+
+# Automated reconnaissance tools
+http.user_agent contains "curl" or http.user_agent contains "wget" or http.user_agent contains "python-requests"
+```
+
+### Splunk Detection Queries
+
+**Social Engineering Reconnaissance Monitoring:**
+
+```splunk
+# Email harvesting tool detection
+index=web_logs sourcetype=access_combined
+| search (uri="*theharvester*" OR user_agent="*theHarvester*" OR uri="*hunter.io*")
+| stats count by src_ip, uri, user_agent
+| eval reconnaissance_type="email_harvesting"
+
+# Google dorking detection
+index=web_logs sourcetype=access_combined
+| search host="*google.com*" (uri="*site:*" AND (uri="*filetype:*" OR uri="*inurl:*" OR uri="*intitle:*"))
+| rex field=uri "q=(?<search_query>[^&]*)"
+| stats count by src_ip, search_query
+| where count > 5
+| eval attack_type="google_dorking"
+
+# Social media intelligence gathering
+index=web_logs sourcetype=access_combined
+| search (host="*linkedin.com*" OR host="*facebook.com*" OR host="*twitter.com*")
+  AND (uri="*search*" OR uri="*company*")
+| bucket _time span=1h
+| stats count dc(host) as platforms by src_ip, _time
+| where count > 10 OR platforms >= 3
+| eval activity="social_media_osint"
+
+# WHOIS enumeration detection
+index=network_logs sourcetype=firewall
+| search dest_port=43 action="allow"
+| stats count by src_ip, dest_ip
+| where count > 20
+| eval reconnaissance_stage="whois_enumeration"
+
+# GitHub/Pastebin reconnaissance
+index=web_logs sourcetype=access_combined
+| search (host="*github.com*" OR host="*pastebin.com*") uri="*search*"
+| rex field=uri "q=(?<search_term>[^&]*)"
+| stats count by src_ip, host, search_term
+| where count > 10
+| eval osint_type="code_repository_search"
+
+# Breach database searches
+index=web_logs sourcetype=access_combined
+| search host IN ("haveibeenpwned.com", "dehashed.com", "leakcheck.net")
+| stats count by src_ip, host, uri
+| eval intelligence_gathering="breach_database_search"
+
+# Automated OSINT tool signatures
+index=web_logs sourcetype=access_combined
+| search user_agent IN ("*recon-ng*", "*theHarvester*", "*maltego*", "*spiderfoot*")
+| stats count values(user_agent) as tools by src_ip
+| eval automated_osint="true"
+```
+
+### SIEM Integration
+
+**QRadar AQL Queries:**
+
+```aql
+-- Email harvesting detection
+SELECT sourceip, destinationip, "URL", count(*) as requests
+FROM events
+WHERE category = 'Web Access'
+AND ("URL" LIKE '%theharvester%' OR "URL" LIKE '%hunter.io%' OR "User Agent" LIKE '%theHarvester%')
+GROUP BY sourceip, destinationip, "URL"
+HAVING requests > 5
+LAST 2 HOURS
+
+-- Google dorking detection
+SELECT sourceip, "URL", count(*) as dork_attempts
+FROM events
+WHERE category = 'Web Access'
+AND hostname = 'www.google.com'
+AND ("URL" LIKE '%site:%' AND ("URL" LIKE '%filetype:%' OR "URL" LIKE '%inurl:%'))
+GROUP BY sourceip, "URL"
+HAVING dork_attempts > 3
+LAST 1 HOURS
+
+-- Social media reconnaissance
+SELECT sourceip, hostname, count(*) as social_searches
+FROM events
+WHERE category = 'Web Access'
+AND hostname IN ('linkedin.com', 'facebook.com', 'twitter.com')
+AND "URL" LIKE '%search%'
+GROUP BY sourceip, hostname
+HAVING social_searches > 10
+LAST 6 HOURS
+
+-- WHOIS enumeration
+SELECT sourceip, destinationip, destinationport, count(*) as whois_queries
+FROM events
+WHERE category = 'Network Activity'
+AND destinationport = 43
+GROUP BY sourceip, destinationip, destinationport
+HAVING whois_queries > 15
+LAST 1 HOURS
+```
+
+**Elastic Stack Detection Rules:**
+
+```json
+{
+  "rule": {
+    "name": "OSINT and Social Engineering Reconnaissance",
+    "query": {
+      "bool": {
+        "should": [
+          {
+            "bool": {
+              "must": [
+                { "term": { "event.category": "web" } },
+                { "wildcard": { "url.original": "*theharvester*" } }
+              ]
+            }
+          },
+          {
+            "bool": {
+              "must": [
+                { "term": { "url.domain": "google.com" } },
+                { "wildcard": { "url.query": "*site:*" } },
+                {
+                  "bool": {
+                    "should": [
+                      { "wildcard": { "url.query": "*filetype:*" } },
+                      { "wildcard": { "url.query": "*inurl:*" } }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "bool": {
+              "must": [
+                {
+                  "terms": {
+                    "url.domain": [
+                      "linkedin.com",
+                      "facebook.com",
+                      "twitter.com"
+                    ]
+                  }
+                },
+                { "wildcard": { "url.path": "*search*" } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "threshold": {
+      "field": "source.ip",
+      "value": 10
+    }
+  }
+}
+```
+
+### Network Security Monitoring
+
+**Suricata Rules:**
+
+```suricata
+# Email harvesting tool detection
+alert http any any -> any any (msg:"Email Harvesting Tool - theHarvester"; http.user_agent; content:"theHarvester"; classtype:attempted-recon; sid:5001001; rev:1;)
+
+alert http any any -> any any (msg:"Email Harvesting Service - Hunter.io"; http.host; content:"hunter.io"; classtype:attempted-recon; sid:5001002; rev:1;)
+
+# Google dorking detection
+alert http any any -> any any (msg:"Google Dorking - File Type Search"; http.uri; content:"site:"; content:"filetype:"; distance:0; within:100; classtype:attempted-recon; sid:5001003; rev:1;)
+
+alert http any any -> any any (msg:"Google Dorking - URL Search"; http.uri; content:"site:"; content:"inurl:"; distance:0; within:100; classtype:attempted-recon; sid:5001004; rev:1;)
+
+# Social media reconnaissance
+alert http any any -> any any (msg:"LinkedIn Company Reconnaissance"; http.host; content:"linkedin.com"; http.uri; content:"company"; threshold:type both, track by_src, count 10, seconds 300; classtype:attempted-recon; sid:5001005; rev:1;)
+
+alert http any any -> any any (msg:"Social Media Intelligence Gathering"; http.host; content:"facebook.com"; http.uri; content:"search"; threshold:type both, track by_src, count 15, seconds 300; classtype:attempted-recon; sid:5001006; rev:1;)
+
+# WHOIS enumeration
+alert tcp any any -> any 43 (msg:"Excessive WHOIS Queries"; threshold:type both, track by_src, count 20, seconds 300; classtype:attempted-recon; sid:5001007; rev:1;)
+
+# GitHub/Pastebin reconnaissance
+alert http any any -> any any (msg:"GitHub Code Repository Search"; http.host; content:"github.com"; http.uri; content:"search"; threshold:type both, track by_src, count 10, seconds 300; classtype:attempted-recon; sid:5001008; rev:1;)
+
+alert http any any -> any any (msg:"Pastebin Intelligence Gathering"; http.host; content:"pastebin.com"; http.uri; content:"search"; threshold:type both, track by_src, count 5, seconds 300; classtype:attempted-recon; sid:5001009; rev:1;)
+
+# Automated OSINT tools
+alert http any any -> any any (msg:"Automated OSINT Tool - Recon-ng"; http.user_agent; content:"recon-ng"; classtype:attempted-recon; sid:5001010; rev:1;)
+
+alert http any any -> any any (msg:"Automated OSINT Tool - Maltego"; http.user_agent; content:"maltego"; classtype:attempted-recon; sid:5001011; rev:1;)
+
+# Breach database searches
+alert http any any -> any any (msg:"Breach Database Search - HaveIBeenPwned"; http.host; content:"haveibeenpwned.com"; threshold:type both, track by_src, count 5, seconds 300; classtype:attempted-recon; sid:5001012; rev:1;)
+
+alert http any any -> any any (msg:"Breach Database Search - Dehashed"; http.host; content:"dehashed.com"; threshold:type both, track by_src, count 3, seconds 300; classtype:attempted-recon; sid:5001013; rev:1;)
+```
+
+**Snort Rules:**
+
+```snort
+# OSINT reconnaissance detection
+alert tcp any any -> any 80 (msg:"OSINT Tool User Agent"; content:"User-Agent:"; http_header; content:"theHarvester"; http_header; classtype:attempted-recon; sid:5001101; rev:1;)
+
+alert tcp any any -> any 443 (msg:"Google Dorking Activity"; content:"Host: www.google.com"; http_header; content:"site:"; http_uri; content:"filetype:"; http_uri; classtype:attempted-recon; sid:5001102; rev:1;)
+
+alert tcp any any -> any 43 (msg:"WHOIS Enumeration"; flow:established,to_server; threshold:type both, track by_src, count 15, seconds 300; classtype:attempted-recon; sid:5001103; rev:1;)
+```
+
+### Log Analysis Scripts
+
+**Web Server OSINT Detection:**
 
 ```bash
 #!/bin/bash
-# Social Engineering Reconnaissance Script
+# OSINT reconnaissance detection in web logs
 
-DOMAIN="$1"
-COMPANY="$2"
-OUTPUT_DIR="osint_${DOMAIN}"
+LOG_FILE="/var/log/apache2/access.log"  # or nginx
+THRESHOLD=10
+TIME_WINDOW=3600  # 1 hour
 
-if [ -z "$DOMAIN" ]; then
-    echo "Usage: $0 <domain> [company_name]"
-    echo "Example: $0 example.com 'Example Corp'"
-    exit 1
-fi
+echo "=== OSINT and Social Engineering Reconnaissance Detection ==="
 
-mkdir -p "$OUTPUT_DIR"
+# Google dorking detection
+echo "[+] Detecting Google dorking activity..."
+awk -v threshold=5 -v window=$TIME_WINDOW '
+BEGIN { current_time = systime() }
+{
+    if ($7 ~ /google\.com.*site:.*filetype:|google\.com.*site:.*inurl:/) {
+        ip = $1
+        timestamp = mktime(substr($4,2,19))
+        if (current_time - timestamp <= window) {
+            dork_count[ip]++
+        }
+    }
+}
+END {
+    for (ip in dork_count) {
+        if (dork_count[ip] >= 3) {
+            print "[!] ALERT: " ip " performed " dork_count[ip] " Google dorks"
+        }
+    }
+}' "$LOG_FILE"
 
-echo "[+] Social Engineering Reconnaissance for $DOMAIN"
+# Email harvesting tool detection
+echo "[+] Detecting email harvesting tools..."
+grep -i "theharvester\|hunter\.io\|clearbit\.com" "$LOG_FILE" | \
+awk '{print "[!] EMAIL HARVESTING: " $1 " -> " $7}' | sort -u
 
-# WHOIS lookup
-echo "[+] WHOIS lookup..."
-whois "$DOMAIN" > "$OUTPUT_DIR/whois.txt"
+# Social media reconnaissance
+echo "[+] Detecting social media reconnaissance..."
+grep -E "linkedin\.com.*search|facebook\.com.*search|twitter\.com.*search" "$LOG_FILE" | \
+awk '{print $1, $7}' | sort | uniq -c | awk '$1 > 10 {print "[!] SOCIAL MEDIA RECON: " $2 " (" $1 " requests)"}'
 
-# Email harvesting with theHarvester
-echo "[+] Email harvesting..."
-if command -v theharvester &> /dev/null; then
-    theharvester -d "$DOMAIN" -l 100 -b google,bing,yahoo > "$OUTPUT_DIR/emails.txt"
-fi
+# OSINT automation tools
+echo "[+] Detecting automated OSINT tools..."
+grep -iE "recon-ng|maltego|spiderfoot|shodan|censys" "$LOG_FILE" | \
+awk '{print "[!] OSINT TOOL: " $1 " -> " $(NF-1)}' | sort -u
 
-# Google dorks (save for manual execution)
-echo "[+] Generating Google dorks..."
-cat > "$OUTPUT_DIR/google_dorks.txt" << EOF
-site:$DOMAIN filetype:pdf
-site:$DOMAIN filetype:xlsx
-site:$DOMAIN filetype:docx
-site:$DOMAIN "confidential"
-site:$DOMAIN "internal use only"
-site:$DOMAIN inurl:admin
-site:$DOMAIN inurl:login
-site:$DOMAIN "index of"
-site:linkedin.com "$COMPANY"
-site:github.com "$DOMAIN"
-site:pastebin.com "$DOMAIN"
-"$DOMAIN" password
-"$DOMAIN" api_key
-"$DOMAIN" secret
-EOF
+# Breach database searches
+echo "[+] Detecting breach database searches..."
+grep -E "haveibeenpwned\.com|dehashed\.com|leakcheck\.net" "$LOG_FILE" | \
+awk '{print "[!] BREACH DB SEARCH: " $1 " -> " $7}' | sort -u
 
-# Social media URLs (for manual checking)
-echo "[+] Generating social media URLs..."
-cat > "$OUTPUT_DIR/social_media_urls.txt" << EOF
-LinkedIn: https://www.linkedin.com/company/$COMPANY
-Twitter: https://twitter.com/search?q=$COMPANY
-Facebook: https://www.facebook.com/search/top?q=$COMPANY
-GitHub: https://github.com/search?q=$DOMAIN
-YouTube: https://www.youtube.com/results?search_query=$COMPANY
-EOF
-
-# Technology detection
-echo "[+] Technology detection..."
-curl -s "http://$DOMAIN" | grep -i "generator\|framework\|version" > "$OUTPUT_DIR/technology.txt"
-
-# Check for common employee email patterns
-echo "[+] Generating email patterns..."
-cat > "$OUTPUT_DIR/email_patterns.txt" << EOF
-admin@$DOMAIN
-administrator@$DOMAIN
-info@$DOMAIN
-contact@$DOMAIN
-support@$DOMAIN
-help@$DOMAIN
-sales@$DOMAIN
-marketing@$DOMAIN
-hr@$DOMAIN
-it@$DOMAIN
-security@$DOMAIN
-webmaster@$DOMAIN
-EOF
-
-# DNS enumeration for additional info
-echo "[+] DNS enumeration..."
-dig "$DOMAIN" ANY > "$OUTPUT_DIR/dns_records.txt"
-
-echo "[+] OSINT gathering complete. Review files in $OUTPUT_DIR/"
-echo "[+] Manual steps required:"
-echo "    1. Execute Google dorks from google_dorks.txt"
-echo "    2. Check social media URLs from social_media_urls.txt"
-echo "    3. Verify email patterns from email_patterns.txt"
-echo "    4. Search for leaked credentials in breach databases"
+# Certificate transparency searches
+echo "[+] Detecting certificate transparency searches..."
+grep -E "crt\.sh|censys\.io.*certificates" "$LOG_FILE" | \
+awk '{print $1}' | sort | uniq -c | \
+awk '$1 > 5 {print "[!] CERT TRANSPARENCY: " $2 " (" $1 " searches)"}'
 ```
+
+**PowerShell OSINT Detection:**
+
+```powershell
+# IIS/Windows OSINT detection
+$LogPath = "C:\inetpub\logs\LogFiles\W3SVC1\"
+$TimeThreshold = (Get-Date).AddHours(-1)
+
+$OSINTPatterns = @{
+    'GoogleDorking' = @('site:', 'filetype:', 'inurl:', 'intitle:')
+    'EmailHarvesting' = @('theharvester', 'hunter.io', 'clearbit.com')
+    'SocialMedia' = @('linkedin.com/search', 'facebook.com/search', 'twitter.com/search')
+    'BreachDatabases' = @('haveibeenpwned.com', 'dehashed.com', 'leakcheck.net')
+    'OSINTTools' = @('recon-ng', 'maltego', 'spiderfoot', 'shodan')
+}
+
+$DetectionResults = @{}
+
+Get-ChildItem $LogPath -Filter "*.log" | ForEach-Object {
+    $LogContent = Get-Content $_.FullName | Where-Object { $_ -notmatch "^#" }
+
+    $LogContent | ForEach-Object {
+        $Fields = $_ -split " "
+        $DateTime = [DateTime]::Parse("$($Fields[0]) $($Fields[1])")
+
+        if ($DateTime -gt $TimeThreshold) {
+            $SourceIP = $Fields[2]
+            $URI = $Fields[4]
+            $UserAgent = $Fields[9]
+
+            # Check for OSINT patterns
+            foreach ($Category in $OSINTPatterns.Keys) {
+                foreach ($Pattern in $OSINTPatterns[$Category]) {
+                    if ($URI -like "*$Pattern*" -or $UserAgent -like "*$Pattern*") {
+                        if (-not $DetectionResults.ContainsKey($SourceIP)) {
+                            $DetectionResults[$SourceIP] = @{}
+                        }
+                        if (-not $DetectionResults[$SourceIP].ContainsKey($Category)) {
+                            $DetectionResults[$SourceIP][$Category] = 0
+                        }
+                        $DetectionResults[$SourceIP][$Category]++
+                    }
+                }
+            }
+        }
+    }
+}
+
+# Generate alerts
+Write-Host "=== OSINT Reconnaissance Detection Results ===" -ForegroundColor Yellow
+
+$DetectionResults.GetEnumerator() | ForEach-Object {
+    $SourceIP = $_.Key
+    $Activities = $_.Value
+
+    Write-Host "`nSource IP: $SourceIP" -ForegroundColor Cyan
+
+    $Activities.GetEnumerator() | ForEach-Object {
+        $Activity = $_.Key
+        $Count = $_.Value
+
+        $Severity = "Medium"
+        if ($Count -gt 20) { $Severity = "High" }
+        elseif ($Count -lt 5) { $Severity = "Low" }
+
+        Write-Warning "[$Severity] $Activity : $Count occurrences"
+    }
+}
+```
+
+### Python Behavioral Analysis
+
+```python
+#!/usr/bin/env python3
+"""
+OSINT and Social Engineering Reconnaissance Detection
+Analyzes web logs for reconnaissance patterns and automated tools
+"""
+
+import re
+import sys
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+import argparse
+import json
+from urllib.parse import unquote, parse_qs
+
+class OSINTDetector:
+    def __init__(self, log_file, time_window=3600):
+        self.log_file = log_file
+        self.time_window = time_window
+
+        # Pattern definitions
+        self.osint_patterns = {
+            'google_dorking': [
+                r'site:[^\s&]+.*filetype:[^\s&]+',
+                r'site:[^\s&]+.*inurl:[^\s&]+',
+                r'site:[^\s&]+.*intitle:[^\s&]+',
+                r'site:[^\s&]+.*"confidential"',
+                r'site:[^\s&]+.*"internal use only"'
+            ],
+            'email_harvesting': [
+                r'theharvester',
+                r'hunter\.io',
+                r'clearbit\.com',
+                r'apollo\.io',
+                r'snov\.io'
+            ],
+            'social_media_recon': [
+                r'linkedin\.com.*search',
+                r'facebook\.com.*search',
+                r'twitter\.com.*search',
+                r'instagram\.com.*search'
+            ],
+            'breach_databases': [
+                r'haveibeenpwned\.com',
+                r'dehashed\.com',
+                r'leakcheck\.net',
+                r'breachdirectory\.org'
+            ],
+            'osint_tools': [
+                r'recon-ng',
+                r'maltego',
+                r'spiderfoot',
+                r'shodan',
+                r'censys',
+                r'theHarvester'
+            ],
+            'cert_transparency': [
+                r'crt\.sh',
+                r'censys\.io.*certificates',
+                r'certificate-transparency'
+            ],
+            'github_recon': [
+                r'github\.com.*search.*q=',
+                r'api\.github\.com.*search'
+            ],
+            'pastebin_searches': [
+                r'pastebin\.com.*search',
+                r'paste\.org.*search'
+            ]
+        }
+
+        # Log parsing pattern
+        self.log_pattern = re.compile(
+            r'(\S+) \S+ \S+ \[(.*?)\] "(\S+) (\S+) \S+" (\d+) \S+ "(.*?)" "(.*?)"'
+        )
+
+        # Detection results
+        self.detections = defaultdict(lambda: defaultdict(list))
+        self.ip_activities = defaultdict(lambda: defaultdict(int))
+
+    def parse_log_line(self, line):
+        """Parse Apache/Nginx log line"""
+        match = self.log_pattern.match(line)
+        if not match:
+            return None
+
+        ip, timestamp_str, method, uri, status, referer, user_agent = match.groups()
+
+        try:
+            timestamp = datetime.strptime(timestamp_str, '%d/%b/%Y:%H:%M:%S %z')
+        except ValueError:
+            return None
+
+        return {
+            'ip': ip,
+            'timestamp': timestamp,
+            'method': method,
+            'uri': unquote(uri),
+            'status': int(status),
+            'referer': referer,
+            'user_agent': user_agent
+        }
+
+    def analyze_osint_patterns(self):
+        """Analyze logs for OSINT reconnaissance patterns"""
+        current_time = datetime.now()
+        cutoff_time = current_time - timedelta(seconds=self.time_window)
+
+        with open(self.log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                parsed = self.parse_log_line(line.strip())
+                if not parsed or parsed['timestamp'] < cutoff_time:
+                    continue
+
+                self.detect_osint_activities(parsed)
+
+        self.generate_alerts()
+
+    def detect_osint_activities(self, entry):
+        """Detect OSINT activities in log entry"""
+        ip = entry['ip']
+        uri = entry['uri']
+        user_agent = entry['user_agent']
+        combined_text = f"{uri} {user_agent}".lower()
+
+        for category, patterns in self.osint_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, combined_text, re.IGNORECASE):
+                    self.detections[ip][category].append({
+                        'timestamp': entry['timestamp'],
+                        'uri': uri,
+                        'user_agent': user_agent,
+                        'pattern': pattern
+                    })
+                    self.ip_activities[ip][category] += 1
+                    break
+
+    def detect_google_dorking(self, entry):
+        """Specific Google dorking detection"""
+        if 'google.com' in entry['uri'].lower():
+            # Extract query parameters
+            if '?q=' in entry['uri'] or '&q=' in entry['uri']:
+                try:
+                    query_start = entry['uri'].lower().find('q=') + 2
+                    query_end = entry['uri'].find('&', query_start)
+                    if query_end == -1:
+                        query = entry['uri'][query_start:]
+                    else:
+                        query = entry['uri'][query_start:query_end]
+
+                    query = unquote(query)
+
+                    # Check for dorking patterns
+                    dork_indicators = ['site:', 'filetype:', 'inurl:', 'intitle:', 'intext:']
+                    if any(indicator in query for indicator in dork_indicators):
+                        self.detections[entry['ip']]['google_dorking'].append({
+                            'timestamp': entry['timestamp'],
+                            'query': query,
+                            'uri': entry['uri']
+                        })
+                        self.ip_activities[entry['ip']]['google_dorking'] += 1
+                except:
+                    pass
+
+    def analyze_user_agent_patterns(self):
+        """Analyze user agent patterns for automation"""
+        automation_indicators = [
+            'python-requests', 'curl/', 'wget/', 'urllib', 'httpclient',
+            'bot', 'crawler', 'spider', 'scraper'
+        ]
+
+        for ip, activities in self.detections.items():
+            for category, entries in activities.items():
+                for entry in entries:
+                    user_agent = entry.get('user_agent', '').lower()
+                    for indicator in automation_indicators:
+                        if indicator in user_agent:
+                            if 'automation_detected' not in self.ip_activities[ip]:
+                                self.ip_activities[ip]['automation_detected'] = 0
+                            self.ip_activities[ip]['automation_detected'] += 1
+                            break
+
+    def generate_alerts(self):
+        """Generate detection alerts"""
+        self.analyze_user_agent_patterns()
+
+        severity_thresholds = {
+            'low': 1,
+            'medium': 5,
+            'high': 15
+        }
+
+        for ip, activities in self.ip_activities.items():
+            total_osint_activity = sum(count for category, count in activities.items()
+                                     if category != 'automation_detected')
+
+            if total_osint_activity == 0:
+                continue
+
+            # Determine severity
+            severity = 'low'
+            if total_osint_activity >= severity_thresholds['high']:
+                severity = 'high'
+            elif total_osint_activity >= severity_thresholds['medium']:
+                severity = 'medium'
+
+            # Check for automation
+            automation_score = activities.get('automation_detected', 0)
+            if automation_score > 5:
+                severity = 'high'
+
+            print(f"\n[{severity.upper()}] OSINT Reconnaissance Detected")
+            print(f"Source IP: {ip}")
+            print(f"Total Activities: {total_osint_activity}")
+
+            if automation_score > 0:
+                print(f"Automation Score: {automation_score}")
+
+            print("Activity Breakdown:")
+            for category, count in activities.items():
+                if count > 0 and category != 'automation_detected':
+                    print(f"  - {category.replace('_', ' ').title()}: {count}")
+
+            # Show sample activities
+            if ip in self.detections:
+                print("\nSample Activities:")
+                for category, entries in self.detections[ip].items():
+                    if entries:
+                        sample = entries[0]  # Show first entry as sample
+                        if 'query' in sample:
+                            print(f"  - {category}: {sample['query']}")
+                        else:
+                            print(f"  - {category}: {sample['uri'][:100]}...")
+
+    def export_report(self, output_file):
+        """Export detailed report to JSON"""
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'analysis_window_seconds': self.time_window,
+            'total_ips_detected': len(self.ip_activities),
+            'detection_summary': {},
+            'detailed_detections': {}
+        }
+
+        # Summary statistics
+        for ip, activities in self.ip_activities.items():
+            for category, count in activities.items():
+                if category not in report['detection_summary']:
+                    report['detection_summary'][category] = 0
+                report['detection_summary'][category] += count
+
+        # Detailed detections
+        for ip, activities in self.detections.items():
+            report['detailed_detections'][ip] = {}
+            for category, entries in activities.items():
+                report['detailed_detections'][ip][category] = [
+                    {
+                        'timestamp': entry['timestamp'].isoformat(),
+                        'uri': entry.get('uri', ''),
+                        'user_agent': entry.get('user_agent', ''),
+                        'pattern': entry.get('pattern', ''),
+                        'query': entry.get('query', '')
+                    }
+                    for entry in entries
+                ]
+
+        with open(output_file, 'w') as f:
+            json.dump(report, f, indent=2, default=str)
+
+        print(f"\nDetailed report saved to {output_file}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='OSINT Reconnaissance Detection Tool')
+    parser.add_argument('log_file', help='Path to web server log file')
+    parser.add_argument('--time-window', type=int, default=3600,
+                       help='Analysis time window in seconds (default: 3600)')
+    parser.add_argument('--export-json', help='Export detailed report to JSON file')
+
+    args = parser.parse_args()
+
+    detector = OSINTDetector(args.log_file, args.time_window)
+
+    try:
+        print("=== OSINT and Social Engineering Reconnaissance Detection ===")
+        detector.analyze_osint_patterns()
+
+        if args.export_json:
+            detector.export_report(args.export_json)
+
+    except FileNotFoundError:
+        print(f"Error: Log file {args.log_file} not found.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error analyzing logs: {e}")
+        sys.exit(1)
+```
+
+### Key Detection Metrics
+
+**Quantitative Indicators:**
+
+- **Google Dorking**: >3 advanced search queries per session
+- **Email Harvesting**: Any use of specialized tools or services
+- **Social Media Reconnaissance**: >10 search queries across platforms
+- **WHOIS Queries**: >15 queries per hour from single IP
+- **Breach Database Searches**: >3 queries to credential databases
+- **Automation Detection**: Tool signatures in user agents
+
+**Behavioral Patterns:**
+
+- Systematic information gathering across multiple sources
+- Sequential searches with increasing specificity
+- Use of OSINT automation tools and frameworks
+- Cross-platform intelligence correlation
+- Time-compressed reconnaissance activities
+- Non-human browsing patterns and timing
+
+**Network Signatures:**
+
+- Multiple external reconnaissance service connections
+- High-frequency API calls to intelligence services
+- Unusual search query patterns and complexity
+- Tool-specific HTTP headers and user agents
+- Bulk data retrieval patterns
 
 ## Detection Methods
 

