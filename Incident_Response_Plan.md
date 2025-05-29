@@ -114,12 +114,436 @@ tcp.port in {4444 1234 8080 9999} or http contains "shell" or http contains "cmd
 ### 1.6.2 Splunk Query-to-Attack Mapping
 
 | Splunk Query Pattern                                                       | Attack Type            | Detection Logic                                      |
-| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------- | ---------- | ------------- | ------------------------------------------------- |
+| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------- |
 | `stats dc(dest_port) as unique_ports by src_ip \| where unique_ports > 50` | Port Scanning          | Identifies sources scanning multiple ports           |
-| `rex field=uri_query "(?<sqli_indicators>('                                | \"                     | UNION                                                | SELECT))"` | SQL Injection | Extracts SQL injection patterns from web requests |
+| `rex field=uri_query "(?<sqli_indicators>('\|"\|UNION\|SELECT))"`          | SQL Injection          | Extracts SQL injection patterns from web requests    |
 | `where match(useragent, "(?i)sqlmap")`                                     | Automated Testing      | Detects automated penetration testing tools          |
 | `stats count by src_mac \| where count > 50`                               | ARP Reconnaissance     | Identifies excessive ARP requests from single source |
 | `transaction src_ip dest_ip dest_port \| where duration > 60`              | Persistent Connections | Detects long-lived connections indicating backdoors  |
+
+---
+
+## 1.7 Splunk Index Discovery and Configuration
+
+### 1.7.1 Initial Splunk Environment Setup
+
+#### Step 1: Identify Available Indexes
+
+Before starting any detection queries, it's essential to discover and understand the available indexes in your Splunk environment.
+
+**Query 1: List All Available Indexes**
+
+```spl
+| rest /services/data/indexes
+| table title splunk_server totalEventCount currentDBSizeMB
+| sort -totalEventCount
+```
+
+**Purpose:** Displays all available indexes with event counts and storage usage.
+
+**Query 2: Search for Network-Related Indexes**
+
+```spl
+| rest /services/data/indexes
+| search title="*network*" OR title="*firewall*" OR title="*ids*" OR title="*packet*"
+| table title splunk_server totalEventCount
+```
+
+**Purpose:** Identifies indexes that likely contain network traffic data.
+
+**Query 3: Search for Web/Application Indexes**
+
+```spl
+| rest /services/data/indexes
+| search title="*web*" OR title="*apache*" OR title="*iis*" OR title="*http*" OR title="*app*"
+| table title splunk_server totalEventCount
+```
+
+**Purpose:** Finds indexes containing web application logs.
+
+**Query 4: Search for Security-Related Indexes**
+
+```spl
+| rest /services/data/indexes
+| search title="*security*" OR title="*auth*" OR title="*sysmon*" OR title="*windows*"
+| table title splunk_server totalEventCount
+```
+
+**Purpose:** Locates security and authentication-related data sources.
+
+#### Step 2: Examine Sample Data from Each Index
+
+**Query 5: Sample Network Index Data**
+
+```spl
+index=network* earliest=-1h
+| head 10
+| table _time, _raw
+```
+
+**Purpose:** Preview network index content to understand data format.
+
+**Query 6: Sample Web Index Data**
+
+```spl
+index=web* earliest=-1h
+| head 10
+| table _time, _raw
+```
+
+**Purpose:** Examine web application log structure.
+
+**Query 7: Identify Source Types**
+
+```spl
+| metadata type=sourcetypes index=*
+| table sourcetype
+| sort sourcetype
+```
+
+**Purpose:** Lists all available sourcetypes across all indexes.
+
+#### Step 3: Map Data Sources to Target Infrastructure
+
+**Query 8: Find Data Related to Target IPs**
+
+```spl
+index=* (src_ip="10.30.0.235" OR dest_ip="10.30.0.235" OR host="10.30.0.235" OR "10.30.0.235") earliest=-1h
+| stats count by index, sourcetype
+| sort -count
+```
+
+**Purpose:** Identifies which indexes contain data for DVWA target (10.30.0.235).
+
+**Query 9: Find Data Related to Juice Shop**
+
+```spl
+index=* (src_ip="10.30.0.237" OR dest_ip="10.30.0.237" OR host="10.30.0.237" OR "10.30.0.237" OR port="3000") earliest=-1h
+| stats count by index, sourcetype
+| sort -count
+```
+
+**Purpose:** Locates data sources for Juice Shop target (10.30.0.237).
+
+**Query 10: Validate Monitoring Node Data**
+
+```spl
+index=* (src_ip="10.30.0.236" OR dest_ip="10.30.0.236" OR host="10.30.0.236" OR "10.30.0.236") earliest=-1h
+| stats count by index, sourcetype
+| sort -count
+```
+
+**Purpose:** Confirms monitoring node (10.30.0.236) data collection.
+
+### 1.7.2 Data Format Analysis
+
+#### Step 4: Analyze Field Extraction
+
+**Query 11: Common Network Fields Discovery**
+
+```spl
+index=network* earliest=-1h
+| fieldsummary
+| where count > 0
+| table field, count, distinct_count
+| sort -count
+```
+
+**Purpose:** Identifies available fields in network data for building detection queries.
+
+**Query 12: Web Application Fields Discovery**
+
+```spl
+index=web* earliest=-1h
+| fieldsummary
+| where count > 0
+| table field, count, distinct_count
+| sort -count
+```
+
+**Purpose:** Maps available fields in web application logs.
+
+**Query 13: Sample Field Values**
+
+```spl
+index=network* earliest=-1h
+| stats values(src_ip) as source_ips, values(dest_ip) as dest_ips, values(dest_port) as ports
+| head 1
+```
+
+**Purpose:** Shows example values to understand data format.
+
+### 1.7.3 Index Configuration Validation
+
+#### Step 5: Verify Data Ingestion
+
+**Query 14: Recent Data Ingestion Check**
+
+```spl
+| metadata type=hosts index=*
+| eval last_ingestion=strftime(lastTime,"%Y-%m-%d %H:%M:%S")
+| table host, index, last_ingestion
+| sort -lastTime
+```
+
+**Purpose:** Confirms recent data ingestion from target hosts.
+
+**Query 15: Data Volume Analysis**
+
+```spl
+index=* earliest=-24h
+| bucket _time span=1h
+| stats count by _time, index
+| sort _time
+```
+
+**Purpose:** Analyzes data ingestion patterns over time.
+
+### 1.7.4 Create Index Reference Map
+
+Based on the discovery queries above, create a reference map for your environment:
+
+**Common Index Naming Conventions:**
+
+- **Network Traffic:** `index=network`, `index=firewall`, `index=packets`, `index=zeek`
+- **Web Applications:** `index=web`, `index=apache`, `index=iis`, `index=nginx`
+- **Security Events:** `index=security`, `index=wineventlog`, `index=sysmon`
+- **Authentication:** `index=auth`, `index=ad`, `index=ldap`
+- **System Logs:** `index=os`, `index=linux`, `index=windows`
+
+**Target-Specific Index Mapping:**
+
+```spl
+# Update these indexes based on your discovery results
+| eval target_indexes = case(
+    host="10.30.0.235", "network,web,security",
+    host="10.30.0.237", "web,application,security",
+    host="10.30.0.236", "network,monitoring",
+    1=1, "unknown"
+)
+```
+
+### 1.7.5 Customize Detection Queries
+
+After completing index discovery, update all detection queries in this document by replacing the generic index names with your specific indexes:
+
+**Before Discovery:**
+
+```spl
+index=network tcp_flags="S"
+```
+
+**After Discovery (Example):**
+
+```spl
+index=pfsense_logs tcp_flags="S"
+```
+
+#### Step 6: Create Index Macros (Recommended)
+
+**Create Reusable Macros:**
+
+```spl
+# Network data macro
+[network_data]
+definition = index=your_network_index OR index=your_firewall_index
+iseval = 0
+
+# Web data macro
+[web_data]
+definition = index=your_web_index OR index=your_apache_index
+iseval = 0
+
+# Security data macro
+[security_data]
+definition = index=your_security_index OR index=your_auth_index
+iseval = 0
+```
+
+**Usage in Detection Queries:**
+
+```spl
+`network_data` tcp_flags="S" dest_ip="10.30.0.235"
+| stats dc(dest_port) as unique_ports by src_ip
+| where unique_ports > 50
+```
+
+---
+
+## 2. Detection of PHP Reverse Shell Attack
+
+### 2.1 Wireshark Detection Procedures with Detailed Filtering
+
+#### Step 1: Configure Attack-Specific Capture
+
+**Initial Setup Instructions:**
+
+1. Open Wireshark on monitoring node (10.30.0.236)
+2. Start capture on network interface
+3. Apply broad filter to capture all traffic to DVWA target:
+   ```
+   host 10.30.0.235
+   ```
+
+#### Step 2: Phase-by-Phase Detection Filtering
+
+**Phase 1: Network Discovery (netdiscover)**
+
+**Filter 1A - Basic ARP Traffic:**
+
+```
+arp
+```
+
+**Filter 1B - Excessive ARP Requests:**
+
+```
+arp.opcode == 1
+```
+
+**Filter 1C - ARP Requests from Single Source:**
+
+```
+arp.opcode == 1 and arp.src.hw_mac == [ATTACKER_MAC]
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter 1A and observe ARP request patterns
+2. Go to **Statistics → Protocol Hierarchy** to check ARP traffic percentage
+3. Use **Statistics → Conversations → Ethernet** to identify top MAC addresses
+4. Apply Filter 1B to focus on ARP requests only
+5. Look for sequential IP address scanning patterns in **Info** column
+
+**Phase 2: Port Scanning Detection (Nmap)**
+
+**Filter 2A - TCP SYN Scan Detection:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235
+```
+
+**Filter 2B - Port Scan from Specific Source:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and ip.src == [ATTACKER_IP]
+```
+
+**Filter 2C - High Port Scan Detection:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and tcp.dstport > 1024
+```
+
+**Filter 2D - Rapid Scanning Pattern:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and frame.time_delta < 0.01
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter 2A and check **Statistics → Endpoints → IPv4**
+2. Sort by **Packets** column to identify scanning sources
+3. Use **Statistics → I/O Graphs** to visualize scan timing
+4. Apply Filter 2B with identified attacker IP
+5. Go to **Statistics → Service Response Time → TCP** to analyze response patterns
+6. Check for RST responses indicating closed ports
+
+**Phase 3: HTTP File Upload Detection**
+
+**Filter 3A - HTTP POST Requests:**
+
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235
+```
+
+**Filter 3B - File Upload Detection:**
+
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http.content_type contains "multipart/form-data"
+```
+
+**Filter 3C - PHP File Upload:**
+
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http contains "php"
+```
+
+**Filter 3D - Large Upload Detection:**
+
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http.content_length > 1000
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter 3A to see all POST requests
+2. Right-click suspicious POST → **Follow → HTTP Stream**
+3. Look for `Content-Disposition: form-data; name="uploaded"` headers
+4. Search for PHP reverse shell indicators:
+   - `exec()`, `shell_exec()`, `system()`, `passthru()`
+   - `fsockopen()`, `socket_create()`
+   - `/bin/sh`, `/bin/bash`
+5. Export HTTP objects: **File → Export Objects → HTTP**
+
+**Phase 4: Reverse Shell Connection Detection**
+
+**Filter 4A - Reverse Shell Port Traffic:**
+
+```
+tcp.port == 4444 and ip.src == 10.30.0.235
+```
+
+**Filter 4B - Outbound High Port Connections:**
+
+```
+tcp.flags.syn == 1 and ip.src == 10.30.0.235 and tcp.dstport > 1024
+```
+
+**Filter 4C - Shell Command Traffic:**
+
+```
+tcp.port == 4444 and tcp.len > 0
+```
+
+**Filter 4D - Base64 Encoded Commands:**
+
+```
+tcp.port == 4444 and tcp.payload contains "echo"
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter 4A immediately after file upload
+2. Right-click connection → **Follow → TCP Stream**
+3. Look for shell prompt indicators (`$`, `#`, `root@`)
+4. Check for command execution patterns:
+   - `whoami`, `id`, `uname -a`
+   - `cat /etc/passwd`
+   - `ls -la`
+5. Use **Find Packet** (Ctrl+F) to search for specific commands
+
+#### Step 3: Advanced Filtering Techniques
+
+**Multi-Phase Attack Correlation:**
+
+```
+(arp.opcode == 1) or (tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235) or (http.request.method == "POST" and ip.dst == 10.30.0.235) or (tcp.port == 4444)
+```
+
+**Time-Based Analysis:**
+
+```
+host 10.30.0.235 and frame.time >= "2024-01-15 14:00:00" and frame.time <= "2024-01-15 14:30:00"
+```
+
+**Attack Chain Visualization:**
+
+1. Apply comprehensive filter above
+2. Go to **Statistics → Flow Graph**
+3. Select **TCP Flows** and **IPv4 Address**
+4. Analyze attack progression timeline
 
 ---
 
@@ -873,21 +1297,6 @@ wait
 echo "[$(date)] Detection complete. Check logs in $LOGDIR"
 ```
 
-### 7.2 Splunk Forwarder Configuration
-
-```conf
-# inputs.conf
-[monitor:///var/log/detection]
-index = security
-sourcetype = red_team_detection
-
-[tcpout]
-defaultGroup = splunk_indexers
-
-[tcpout:splunk_indexers]
-server = 10.30.0.236:9997
-```
-
 This comprehensive incident response plan provides detailed detection procedures for all red team attacks using Wireshark, Splunk, and tshark across the specified network nodes.
 
 ---
@@ -1492,7 +1901,7 @@ sudo tshark -i eth0 -Y "http.set_cookie" -T fields -e frame.time -e ip.src -e ip
 
 ```spl
 index=web
-| rex field=cookie "(?<session_token>(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
+| rex field=cookie "(?&lt;session_token&gt;(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
 | where isnotnull(session_token)
 | stats dc(src_ip) as unique_ips, values(src_ip) as source_ips by session_token
 | where unique_ips > 1
@@ -1517,7 +1926,7 @@ index=web
 
 ```spl
 index=web
-| rex field=cookie "(?<session_token>(PHPSESSID|JSESSIONID)=[^;]+)"
+| rex field=cookie "(?&lt;session_token&gt;(PHPSESSID|JSESSIONID)=[^;]+)"
 | where isnotnull(session_token)
 | iplocation src_ip
 | stats dc(Country) as unique_countries by session_token user_id
