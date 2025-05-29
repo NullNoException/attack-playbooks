@@ -114,9 +114,9 @@ tcp.port in {4444 1234 8080 9999} or http contains "shell" or http contains "cmd
 ### 1.6.2 Splunk Query-to-Attack Mapping
 
 | Splunk Query Pattern                                                       | Attack Type            | Detection Logic                                      |
-| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------- | ------------- | ------------------------------------------------- |
+| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------- | ---------- | ------------- | ------------------------------------------------- |
 | `stats dc(dest_port) as unique_ports by src_ip \| where unique_ports > 50` | Port Scanning          | Identifies sources scanning multiple ports           |
-| `rex field=uri_query "(?<sqli_indicators>('                                | \"                     | UNION\|SELECT))"`                                    | SQL Injection | Extracts SQL injection patterns from web requests |
+| `rex field=uri_query "(?<sqli_indicators>('                                | \"                     | UNION                                                | SELECT))"` | SQL Injection | Extracts SQL injection patterns from web requests |
 | `where match(useragent, "(?i)sqlmap")`                                     | Automated Testing      | Detects automated penetration testing tools          |
 | `stats count by src_mac \| where count > 50`                               | ARP Reconnaissance     | Identifies excessive ARP requests from single source |
 | `transaction src_ip dest_ip dest_port \| where duration > 60`              | Persistent Connections | Detects long-lived connections indicating backdoors  |
@@ -962,6 +962,8 @@ index=web
 | stats count by src_ip xss_indicators uri_path
 ```
 
+**Detects:** Various XSS payload patterns in web requests.
+
 #### Query X2: Cookie Theft Detection
 
 ```spl
@@ -969,6 +971,40 @@ index=web
 | where match(uri_query, "(?i)(document\.cookie|document\.location|window\.location)")
 | stats count by src_ip uri_path form_data
 ```
+
+**Detects:** JavaScript attempts to steal cookies or redirect users.
+
+#### Query X3: Reflected XSS Detection
+
+```spl
+index=web method="GET"
+| where match(uri_query, "(?i)(<script>|javascript:|onerror)")
+| where match(response_body, uri_query)
+| stats count by src_ip uri_query
+```
+
+**Detects:** Reflected XSS where input is echoed back in response.
+
+#### Query X4: Stored XSS Detection
+
+```spl
+index=web method="POST"
+| rex field=form_data "(?<xss_payload>(<script>|javascript:|onerror)[^&]*)"
+| where isnotnull(xss_payload)
+| stats count by src_ip xss_payload uri_path
+```
+
+**Detects:** XSS payloads submitted via POST forms for persistent storage.
+
+#### Query X5: DOM-Based XSS Detection
+
+```spl
+index=web
+| where match(uri_query, "(?i)(document\.write|innerHTML|location\.hash|location\.search)")
+| stats count by src_ip uri_query
+```
+
+**Detects:** DOM manipulation attempts indicating DOM-based XSS.
 
 ---
 
@@ -1036,6 +1072,8 @@ index=web
 | stats count by src_ip uri_path object_refs
 ```
 
+**Detects:** Sequential manipulation of object reference parameters.
+
 #### Query I2: Unauthorized Access Detection
 
 ```spl
@@ -1045,6 +1083,29 @@ index=web status=200
 | stats dc(uri_query) as unique_access by src_ip
 | where unique_access > 5
 ```
+
+**Detects:** Successful access to multiple user accounts or admin functions.
+
+#### Query I3: Directory Traversal Detection
+
+```spl
+index=web
+| where match(uri_query, "(?i)(\.\.\/|\.\.%2F|\.\.%5C)")
+| stats count by src_ip uri_query uri_path
+```
+
+**Detects:** Directory traversal attempts to access unauthorized files.
+
+#### Query I4: Privilege Escalation Detection
+
+```spl
+index=web
+| where match(uri_path, "(?i)(admin|manager|root)")
+| where NOT match(user_role, "(?i)(admin|administrator)")
+| stats count by src_ip user_id uri_path
+```
+
+**Detects:** Non-privileged users accessing administrative functions.
 
 ---
 
@@ -1110,6 +1171,8 @@ index=web
 | stats count by src_ip host uri_path
 ```
 
+**Detects:** Access to suspicious domains commonly used in phishing.
+
 #### Query P2: Credential Harvesting Detection
 
 ```spl
@@ -1118,6 +1181,29 @@ index=web method="POST"
 | where NOT match(host, "(legitimate-login-domains)")
 | stats count by src_ip host form_data
 ```
+
+**Detects:** Credential submission to non-legitimate domains.
+
+#### Query P3: Email Link Click Detection
+
+```spl
+index=web
+| where match(referer, "(?i)(email|mail|webmail)")
+| where match(host, "(?i)(security|verify|update|account)")
+| stats count by src_ip referer host
+```
+
+**Detects:** Users clicking links from emails to suspicious domains.
+
+#### Query P4: Typosquatting Detection
+
+```spl
+index=dns
+| where match(query, "(?i)(g00gle|microsooft|payp4l|amaz0n)")
+| stats count by src_ip query
+```
+
+**Detects:** DNS queries for typosquatted domains mimicking legitimate sites.
 
 ---
 
@@ -1184,6 +1270,8 @@ index=network tcp_flags="S"
 | sort -syn_count
 ```
 
+**Detects:** High volume of SYN packets indicating potential SYN flood attack.
+
 #### Query S2: Source IP Analysis
 
 ```spl
@@ -1192,6 +1280,40 @@ index=network tcp_flags="S" dest_ip="10.30.0.235"
 | where count > 50
 | sort -count
 ```
+
+**Detects:** Top sources of SYN packets for attack attribution.
+
+#### Query S3: Incomplete Connection Detection
+
+```spl
+index=network tcp_flags="S" dest_ip="10.30.0.235"
+| join src_ip dest_ip dest_port [search index=network tcp_flags="SA" OR tcp_flags="R"]
+| where isnull(tcp_flags_join)
+| stats count as incomplete_handshakes by src_ip
+```
+
+**Detects:** SYN packets without corresponding SYN-ACK or RST responses.
+
+#### Query S4: Distributed Attack Detection
+
+```spl
+index=network tcp_flags="S" dest_ip="10.30.0.235"
+| stats dc(src_ip) as unique_sources, count as total_syns by dest_port
+| where unique_sources > 100 AND total_syns > 1000
+```
+
+**Detects:** Distributed SYN flood from multiple sources.
+
+#### Query S5: Attack Rate Analysis
+
+```spl
+index=network tcp_flags="S" dest_ip="10.30.0.235"
+| bucket _time span=1m
+| stats count as syn_rate by _time
+| where syn_rate > baseline_rate * 10
+```
+
+**Detects:** SYN packet rates significantly above normal baseline.
 
 ---
 
@@ -1257,6 +1379,8 @@ index=web uri_path contains "login" method="POST"
 | sort -attempts
 ```
 
+**Detects:** Excessive login attempts indicating brute force attacks.
+
 #### Query B2: SSH Brute Force Detection
 
 ```spl
@@ -1265,6 +1389,49 @@ index=network dest_port=22 tcp_flags="S"
 | stats count as attempts by _time src_ip dest_ip
 | where attempts > 10
 ```
+
+**Detects:** High-frequency SSH connection attempts.
+
+#### Query B3: Failed Login Pattern Detection
+
+```spl
+index=web uri_path contains "login" (status=401 OR status=403)
+| stats count as failed_attempts by src_ip
+| where failed_attempts > 15
+```
+
+**Detects:** Multiple failed authentication attempts.
+
+#### Query B4: Password Spraying Detection
+
+```spl
+index=web uri_path contains "login" method="POST"
+| rex field=form_data "username=(?<username>[^&]+)"
+| stats dc(username) as unique_users, count as attempts by src_ip
+| where unique_users > 5 AND attempts > 20
+```
+
+**Detects:** Password spraying attacks across multiple usernames.
+
+#### Query B5: Credential Stuffing Detection
+
+```spl
+index=web uri_path contains "login" method="POST"
+| stats count as attempts, dc(user_agent) as unique_agents by src_ip
+| where attempts > 50 AND unique_agents = 1
+```
+
+**Detects:** Automated credential stuffing using compromised credentials.
+
+#### Query B6: Account Lockout Detection
+
+```spl
+index=auth event_type="account_locked"
+| stats count as lockouts by username
+| where lockouts > 3
+```
+
+**Detects:** Accounts being locked due to brute force attempts.
 
 ---
 
@@ -1325,12 +1492,14 @@ sudo tshark -i eth0 -Y "http.set_cookie" -T fields -e frame.time -e ip.src -e ip
 
 ```spl
 index=web
-| rex field=cookie "(?&lt;session_token&gt;(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
+| rex field=cookie "(?<session_token>(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
 | where isnotnull(session_token)
 | stats dc(src_ip) as unique_ips, values(src_ip) as source_ips by session_token
 | where unique_ips > 1
 | sort -unique_ips
 ```
+
+**Detects:** Session tokens being used from multiple IP addresses.
 
 #### Query H2: Session Anomaly Detection
 
@@ -1341,6 +1510,46 @@ index=web
 | stats values(src_ip) as source_ips, values(user_agent) as user_agents by session_token
 | where mvcount(source_ips) > 1 OR mvcount(user_agents) > 1
 ```
+
+**Detects:** Sessions showing multiple IP addresses or user agents.
+
+#### Query H3: Geographic Session Anomaly
+
+```spl
+index=web
+| rex field=cookie "(?<session_token>(PHPSESSID|JSESSIONID)=[^;]+)"
+| where isnotnull(session_token)
+| iplocation src_ip
+| stats dc(Country) as unique_countries by session_token user_id
+| where unique_countries > 1
+```
+
+**Detects:** Sessions active from multiple geographic locations.
+
+#### Query H4: Session Fixation Detection
+
+```spl
+index=web uri_path contains "login"
+| rex field=response_headers "Set-Cookie: (?<new_session>[^;]+)"
+| rex field=cookie "(?<old_session>[^;]+)"
+| where new_session = old_session
+| stats count by src_ip session_id
+```
+
+**Detects:** Session IDs not changing after authentication.
+
+#### Query H5: Concurrent Session Detection
+
+```spl
+index=web
+| rex field=cookie "(?<session_token>sessionid=[^;]+)"
+| where isnotnull(session_token)
+| bucket _time span=1m
+| stats dc(src_ip) as concurrent_ips by _time session_token
+| where concurrent_ips > 1
+```
+
+**Detects:** Same session being used simultaneously from multiple locations.
 
 ---
 
