@@ -68,11 +68,15 @@ sudo wireshark -i eth0
 host 10.30.0.235 and (tcp or icmp or arp)
 ```
 
+**Detects:** All network activity to/from DVWA target including reconnaissance, exploitation attempts, and data exfiltration.
+
 #### Preset 2: Juice Shop Target Monitoring (10.30.0.237)
 
 ```
 host 10.30.0.237 and tcp.port == 3000
 ```
+
+**Detects:** HTTP/HTTPS traffic to Juice Shop application, SQL injection attempts, authentication bypass, and application-layer attacks.
 
 #### Preset 3: Network Reconnaissance Detection
 
@@ -80,11 +84,42 @@ host 10.30.0.237 and tcp.port == 3000
 (arp.opcode == 1) or (icmp.type == 8) or (tcp.flags.syn == 1 and tcp.flags.ack == 0)
 ```
 
+**Detects:** Network discovery activities including ARP scanning, ping sweeps, and port scanning attempts.
+
 #### Preset 4: Malicious Traffic Detection
 
 ```
 tcp.port in {4444 1234 8080 9999} or http contains "shell" or http contains "cmd"
 ```
+
+**Detects:** Reverse shell connections, command injection attempts, and backdoor communications.
+
+---
+
+## 1.6 Attack Detection Matrix
+
+### 1.6.1 Wireshark Filter-to-Attack Mapping
+
+| Filter                                                                  | Attack Type            | Detection Purpose                                      |
+| ----------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------ |
+| `arp.opcode == 1`                                                       | Network Reconnaissance | Detects ARP scanning and network discovery             |
+| `tcp.flags.syn == 1 and tcp.flags.ack == 0`                             | Port Scanning          | Identifies TCP SYN scans and stealth scanning          |
+| `http.request.method == "POST" and http contains "multipart/form-data"` | File Upload Attack     | Detects malicious file uploads including webshells     |
+| `tcp.port == 4444`                                                      | Reverse Shell          | Monitors backdoor connections and command execution    |
+| `http contains "'" or http contains "UNION"`                            | SQL Injection          | Identifies SQL injection payloads and database attacks |
+| `http.user_agent contains "sqlmap"`                                     | Automated SQL Testing  | Detects SQLMap and other automated testing tools       |
+| `icmp.type == 8`                                                        | Network Discovery      | Monitors ping sweeps and host enumeration              |
+| `tcp.flags.push == 1 and tcp.len > 0`                                   | Service Enumeration    | Detects banner grabbing and service fingerprinting     |
+
+### 1.6.2 Splunk Query-to-Attack Mapping
+
+| Splunk Query Pattern                                                       | Attack Type            | Detection Logic                                      |
+| -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------- | ------------- | ------------------------------------------------- |
+| `stats dc(dest_port) as unique_ports by src_ip \| where unique_ports > 50` | Port Scanning          | Identifies sources scanning multiple ports           |
+| `rex field=uri_query "(?<sqli_indicators>('                                | \"                     | UNION\|SELECT))"`                                    | SQL Injection | Extracts SQL injection patterns from web requests |
+| `where match(useragent, "(?i)sqlmap")`                                     | Automated Testing      | Detects automated penetration testing tools          |
+| `stats count by src_mac \| where count > 50`                               | ARP Reconnaissance     | Identifies excessive ARP requests from single source |
+| `transaction src_ip dest_ip dest_port \| where duration > 60`              | Persistent Connections | Detects long-lived connections indicating backdoors  |
 
 ---
 
@@ -819,7 +854,7 @@ detect_port_scan() {
 detect_sqli() {
     echo "[$(date)] Starting SQL injection detection..."
     sudo tshark -i $INTERFACE -f "port 3000 or port 80" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | \
-    grep -E "('|UNION|SELECT|--)" > $LOGDIR/sqli_$(date +%Y%m%d_%H%M%S).log
+    grep -E "('|UNION|SELECT|--|;)" > $LOGDIR/sqli_$(date +%Y%m%d_%H%M%S).log
 }
 
 # Function to detect reverse shells
@@ -854,3 +889,697 @@ server = 10.30.0.236:9997
 ```
 
 This comprehensive incident response plan provides detailed detection procedures for all red team attacks using Wireshark, Splunk, and tshark across the specified network nodes.
+
+---
+
+## 8. Detection of Cross-Site Scripting (XSS) Attacks
+
+### 8.1 Wireshark Detection Procedures
+
+#### Step 1: XSS Payload Detection in HTTP Traffic
+
+**Filter X1A - Basic XSS Detection:**
+
+```
+http contains "<script>" or http contains "javascript:" or http contains "onerror"
+```
+
+**Detects:** Reflected and stored XSS attempts in HTTP requests/responses.
+
+**Filter X1B - Encoded XSS Detection:**
+
+```
+http contains "%3Cscript%3E" or http contains "%3C" or http contains "&#"
+```
+
+**Detects:** URL-encoded and HTML-encoded XSS payloads.
+
+**Filter X1C - Event Handler XSS:**
+
+```
+http contains "onload" or http contains "onclick" or http contains "onmouseover"
+```
+
+**Detects:** XSS attacks using HTML event handlers.
+
+**Filter X1D - DOM-based XSS:**
+
+```
+http contains "document.write" or http contains "innerHTML" or http contains "location.hash"
+```
+
+**Detects:** DOM manipulation attempts indicating DOM-based XSS.
+
+#### Analysis Instructions:
+
+1. Monitor GET/POST parameters for script tags
+2. Check for JavaScript execution attempts in form fields
+3. Look for cookie theft attempts: `document.cookie`
+4. Analyze response headers for Content-Security-Policy bypass attempts
+
+### 8.2 Tshark Detection Commands
+
+#### Command X1: Monitor XSS Attempts
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443 or port 3000" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | grep -E "(<script>|javascript:|onerror|onload)"
+```
+
+#### Command X2: Detect Encoded XSS
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443" -Y "http contains \"%3C\" or http contains \"&#\"" -w xss_encoded.pcap
+```
+
+### 8.3 Splunk Detection Queries
+
+#### Query X1: XSS Pattern Detection
+
+```spl
+index=web
+| rex field=uri_query "(?<xss_indicators>(<script>|javascript:|onerror|onload|alert\(|document\.cookie))"
+| where isnotnull(xss_indicators)
+| stats count by src_ip xss_indicators uri_path
+```
+
+#### Query X2: Cookie Theft Detection
+
+```spl
+index=web
+| where match(uri_query, "(?i)(document\.cookie|document\.location|window\.location)")
+| stats count by src_ip uri_path form_data
+```
+
+---
+
+## 9. Detection of Insecure Direct Object Reference (IDOR) Attacks
+
+### 9.1 Wireshark Detection Procedures
+
+#### Step 1: IDOR Pattern Detection
+
+**Filter I1A - Sequential ID Access:**
+
+```
+http.request.uri contains "id=" or http.request.uri contains "user=" or http.request.uri contains "file="
+```
+
+**Detects:** Direct object reference attempts in URL parameters.
+
+**Filter I1B - Administrative Function Access:**
+
+```
+http.request.uri contains "admin" or http.request.uri contains "profile" or http.request.uri contains "account"
+```
+
+**Detects:** Attempts to access administrative or user-specific functions.
+
+**Filter I1C - File System Access:**
+
+```
+http.request.uri contains "../" or http.request.uri contains "..%2F" or http.request.uri contains "file="
+```
+
+**Detects:** Directory traversal and file access attempts.
+
+#### Analysis Instructions:
+
+1. Look for incremental ID manipulation in requests
+2. Monitor for access to other users' data
+3. Check for privilege escalation attempts
+4. Analyze response codes for successful unauthorized access (200 OK)
+
+### 9.2 Tshark Detection Commands
+
+#### Command I1: Monitor ID Parameter Manipulation
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443 or port 3000" -Y "http.request.uri contains \"id=\"" -T fields -e frame.time -e ip.src -e http.request.uri
+```
+
+#### Command I2: Detect Directory Traversal
+
+```bash
+sudo tshark -i eth0 -Y "http.request.uri contains \"../\" or http.request.uri contains \"..%2F\"" -w idor_traversal.pcap
+```
+
+### 9.3 Splunk Detection Queries
+
+#### Query I1: IDOR Parameter Manipulation
+
+```spl
+index=web
+| rex field=uri_query "(?<object_refs>(id=|user=|file=|account=)(?<ref_value>\d+))"
+| where isnotnull(object_refs)
+| eventstats dc(ref_value) as unique_refs by src_ip uri_path
+| where unique_refs > 10
+| stats count by src_ip uri_path object_refs
+```
+
+#### Query I2: Unauthorized Access Detection
+
+```spl
+index=web status=200
+| where match(uri_path, "(?i)(admin|profile|account|user)")
+| where match(uri_query, "(id=|user=)")
+| stats dc(uri_query) as unique_access by src_ip
+| where unique_access > 5
+```
+
+---
+
+## 10. Detection of Phishing Attacks
+
+### 10.1 Wireshark Detection Procedures
+
+#### Step 1: Phishing Infrastructure Detection
+
+**Filter P1A - Suspicious Domain Access:**
+
+```
+dns or http.host contains "security" or http.host contains "verify" or http.host contains "update"
+```
+
+**Detects:** DNS queries and HTTP requests to domains commonly used in phishing.
+
+**Filter P1B - Credential Harvesting:**
+
+```
+http.request.method == "POST" and (http contains "password" or http contains "username" or http contains "login")
+```
+
+**Detects:** POST requests containing credentials to potentially malicious sites.
+
+**Filter P1C - Redirect Chains:**
+
+```
+http.response.code == 302 or http.response.code == 301
+```
+
+**Detects:** HTTP redirects used to obscure phishing destinations.
+
+#### Analysis Instructions:
+
+1. Monitor for suspicious domain registrations
+2. Check for SSL certificate anomalies
+3. Look for credential submission to non-legitimate domains
+4. Analyze referrer headers for phishing email links
+
+### 10.2 Tshark Detection Commands
+
+#### Command P1: Monitor Credential Submissions
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443" -Y "http.request.method == \"POST\" and http contains \"password\"" -T fields -e frame.time -e ip.src -e http.host -e http.request.uri
+```
+
+#### Command P2: Detect Suspicious DNS Queries
+
+```bash
+sudo tshark -i eth0 -f "port 53" -Y "dns" -T fields -e frame.time -e ip.src -e dns.qry.name | grep -E "(security|verify|update|account)"
+```
+
+### 10.3 Splunk Detection Queries
+
+#### Query P1: Phishing Domain Detection
+
+```spl
+index=web
+| where match(host, "(?i)(security|verify|update|account|confirm)")
+| where NOT match(host, "(legitimate-domain\.com|trusted-site\.org)")
+| stats count by src_ip host uri_path
+```
+
+#### Query P2: Credential Harvesting Detection
+
+```spl
+index=web method="POST"
+| where match(form_data, "(?i)(password|username|login|email)")
+| where NOT match(host, "(legitimate-login-domains)")
+| stats count by src_ip host form_data
+```
+
+---
+
+## 11. Detection of SYN Flood DDoS Attacks
+
+### 11.1 Wireshark Detection Procedures
+
+#### Step 1: SYN Flood Pattern Detection
+
+**Filter S1A - High Volume SYN Packets:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0
+```
+
+**Detects:** TCP SYN packets indicating potential SYN flood attacks.
+
+**Filter S1B - Incomplete Handshakes:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and not tcp.flags.reset == 1
+```
+
+**Detects:** SYN packets without corresponding ACK or RST responses.
+
+**Filter S1C - Source IP Analysis:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235
+```
+
+**Detects:** SYN packets targeting specific servers for flood analysis.
+
+#### Analysis Instructions:
+
+1. Use Statistics → I/O Graphs to visualize SYN packet rates
+2. Check for randomized or spoofed source IPs
+3. Monitor TCP conversations for incomplete handshakes
+4. Analyze destination port patterns
+
+### 11.2 Tshark Detection Commands
+
+#### Command S1: Monitor SYN Flood Activity
+
+```bash
+sudo tshark -i eth0 -f "tcp[tcpflags] & tcp-syn != 0" -T fields -e frame.time -e ip.src -e ip.dst -e tcp.dstport | head -1000
+```
+
+#### Command S2: Analyze SYN Rate
+
+```bash
+sudo tshark -i eth0 -f "tcp[tcpflags] & tcp-syn != 0" -T fields -e frame.time | awk '{print strftime("%Y-%m-%d %H:%M:%S", $1)}' | uniq -c
+```
+
+### 11.3 Splunk Detection Queries
+
+#### Query S1: SYN Flood Detection
+
+```spl
+index=network tcp_flags="S"
+| bucket _time span=1s
+| stats count as syn_count by _time dest_ip
+| where syn_count > 100
+| sort -syn_count
+```
+
+#### Query S2: Source IP Analysis
+
+```spl
+index=network tcp_flags="S" dest_ip="10.30.0.235"
+| stats count by src_ip
+| where count > 50
+| sort -count
+```
+
+---
+
+## 12. Detection of Brute Force Attacks
+
+### 12.1 Wireshark Detection Procedures
+
+#### Step 1: Authentication Brute Force Detection
+
+**Filter B1A - Multiple Login Attempts:**
+
+```
+http.request.uri contains "login" and http.request.method == "POST"
+```
+
+**Detects:** Repeated POST requests to login endpoints.
+
+**Filter B1B - SSH Brute Force:**
+
+```
+tcp.port == 22 and tcp.flags.syn == 1
+```
+
+**Detects:** Multiple SSH connection attempts.
+
+**Filter B1C - FTP Brute Force:**
+
+```
+ftp.request.command == "USER" or ftp.request.command == "PASS"
+```
+
+**Detects:** FTP authentication attempts.
+
+#### Analysis Instructions:
+
+1. Count login attempts per source IP
+2. Monitor for failed authentication responses
+3. Check for password spraying patterns
+4. Analyze timing between attempts
+
+### 12.2 Tshark Detection Commands
+
+#### Command B1: Monitor Login Attempts
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443" -Y "http.request.uri contains \"login\" and http.request.method == \"POST\"" -T fields -e frame.time -e ip.src -e http.host
+```
+
+#### Command B2: SSH Brute Force Detection
+
+```bash
+sudo tshark -i eth0 -f "port 22" -T fields -e frame.time -e ip.src -e ip.dst | sort | uniq -c | awk '$1 > 10'
+```
+
+### 12.3 Splunk Detection Queries
+
+#### Query B1: HTTP Brute Force Detection
+
+```spl
+index=web uri_path contains "login" method="POST"
+| stats count as attempts by src_ip
+| where attempts > 20
+| sort -attempts
+```
+
+#### Query B2: SSH Brute Force Detection
+
+```spl
+index=network dest_port=22 tcp_flags="S"
+| bucket _time span=1m
+| stats count as attempts by _time src_ip dest_ip
+| where attempts > 10
+```
+
+---
+
+## 13. Detection of Session Hijacking Attacks
+
+### 13.1 Wireshark Detection Procedures
+
+#### Step 1: Session Token Analysis
+
+**Filter H1A - Cookie Theft:**
+
+```
+http.cookie or http.set_cookie
+```
+
+**Detects:** HTTP cookies that could be targets for session hijacking.
+
+**Filter H1B - Session Fixation:**
+
+```
+http contains "JSESSIONID" or http contains "PHPSESSID" or http contains "ASP.NET_SessionId"
+```
+
+**Detects:** Session identifiers in HTTP traffic.
+
+**Filter H1C - Duplicate Session Usage:**
+
+```
+http.cookie contains "sessionid" or http.cookie contains "session"
+```
+
+**Detects:** Session cookies being used from multiple sources.
+
+#### Analysis Instructions:
+
+1. Track session tokens across different source IPs
+2. Monitor for session token reuse
+3. Check for missing HTTPOnly/Secure flags
+4. Analyze timing of session usage patterns
+
+### 13.2 Tshark Detection Commands
+
+#### Command H1: Extract Session Tokens
+
+```bash
+sudo tshark -i eth0 -f "port 80 or port 443" -Y "http.cookie" -T fields -e frame.time -e ip.src -e http.cookie | grep -E "(sessionid|PHPSESSID|JSESSIONID)"
+```
+
+#### Command H2: Monitor Session Activity
+
+```bash
+sudo tshark -i eth0 -Y "http.set_cookie" -T fields -e frame.time -e ip.src -e ip.dst -e http.set_cookie
+```
+
+### 13.3 Splunk Detection Queries
+
+#### Query H1: Session Hijacking Detection
+
+```spl
+index=web
+| rex field=cookie "(?&lt;session_token&gt;(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
+| where isnotnull(session_token)
+| stats dc(src_ip) as unique_ips, values(src_ip) as source_ips by session_token
+| where unique_ips > 1
+| sort -unique_ips
+```
+
+#### Query H2: Session Anomaly Detection
+
+```spl
+index=web
+| rex field=cookie "sessionid=(?<session_token>[^;]+)"
+| where isnotnull(session_token)
+| stats values(src_ip) as source_ips, values(user_agent) as user_agents by session_token
+| where mvcount(source_ips) > 1 OR mvcount(user_agents) > 1
+```
+
+---
+
+## 14. Comprehensive Attack Detection Dashboard
+
+### 14.1 Enhanced Splunk Dashboard Configuration
+
+#### Multi-Attack Detection Dashboard XML:
+
+```xml
+<dashboard>
+  <label>Advanced Red Team Attack Detection</label>
+  <row>
+    <panel>
+      <title>Network Reconnaissance</title>
+      <chart>
+        <search>
+          <query>
+            index=network (arp OR icmp_type=8 OR tcp_flags="S")
+            | timechart span=1m count by attack_type
+          </query>
+        </search>
+      </chart>
+    </panel>
+    <panel>
+      <title>Web Application Attacks</title>
+      <table>
+        <search>
+          <query>
+            index=web
+            | rex field=uri_query "(?&lt;attack_indicators&gt;('|UNION|SELECT|&lt;script&gt;|javascript:|../|id=))"
+            | where isnotnull(attack_indicators)
+            | eval attack_type=case(
+                match(attack_indicators, "('|UNION|SELECT)"), "SQL Injection",
+                match(attack_indicators, "(&lt;script&gt;|javascript:)"), "XSS",
+                match(attack_indicators, "(../|id=)"), "IDOR/Path Traversal",
+                1=1, "Other"
+              )
+            | stats count by src_ip attack_type
+            | sort -count
+          </query>
+        </search>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Brute Force Attempts</title>
+      <chart>
+        <search>
+          <query>
+            index=web uri_path contains "login" method="POST"
+            | bucket _time span=5m
+            | stats count as attempts by _time src_ip
+            | where attempts > 5
+            | timechart span=5m sum(attempts) by src_ip
+          </query>
+        </search>
+      </chart>
+    </panel>
+    <panel>
+      <title>DDoS/Flood Attacks</title>
+      <single>
+        <search>
+          <query>
+            index=network tcp_flags="S"
+            | bucket _time span=1s
+            | stats count as syn_count by _time
+            | where syn_count > 100
+            | stats max(syn_count) as peak_syn_rate
+          </query>
+        </search>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Session Hijacking Indicators</title>
+      <table>
+        <search>
+          <query>
+            index=web
+            | rex field=cookie "(?&lt;session_token&gt;(PHPSESSID|JSESSIONID|sessionid)=[^;]+)"
+            | where isnotnull(session_token)
+            | stats dc(src_ip) as unique_ips, values(src_ip) as source_ips by session_token
+            | where unique_ips > 1
+            | sort -unique_ips
+          </query>
+        </search>
+      </table>
+    </panel>
+  </row>
+</dashboard>
+```
+
+### 14.2 Advanced Alert Configuration
+
+#### Alert A1: Multi-Vector Attack Detection
+
+```spl
+(index=web AND (match(uri_query, "('|UNION|SELECT|<script>|javascript:)") OR method="POST" AND uri_path contains "login"))
+OR (index=network AND tcp_flags="S" AND dest_ip IN ("10.30.0.235", "10.30.0.236", "10.30.0.237"))
+| stats count by src_ip attack_vector
+| where count > 10
+```
+
+#### Alert A2: Advanced Persistent Threat (APT) Indicators
+
+```spl
+index=*
+| eval apt_score=0
+| eval apt_score=if(match(user_agent, "(?i)(sqlmap|nmap|burp)"), apt_score+2, apt_score)
+| eval apt_score=if(match(uri_query, "('|UNION|SELECT)"), apt_score+3, apt_score)
+| eval apt_score=if(dest_port IN (4444,1234,8080), apt_score+5, apt_score)
+| eval apt_score=if(match(uri_query, "(<script>|javascript:)"), apt_score+2, apt_score)
+| where apt_score >= 5
+| stats sum(apt_score) as total_apt_score by src_ip
+| sort -total_apt_score
+```
+
+---
+
+## 15. Automated Multi-Attack Detection Script
+
+### 15.1 Comprehensive Detection Script
+
+```bash
+#!/bin/bash
+# Advanced Red Team Attack Detection Script
+# Detects: SQL Injection, XSS, IDOR, Brute Force, SYN Flood, Session Hijacking
+
+TARGETS="10.30.0.235 10.30.0.236 10.30.0.237"
+INTERFACE="eth0"
+LOGDIR="/var/log/multi_attack_detection"
+PCAP_DIR="$LOGDIR/pcaps"
+
+# Create directories
+mkdir -p $LOGDIR $PCAP_DIR
+
+# Function to detect SQL Injection
+detect_sqli() {
+    echo "[$(date)] Detecting SQL Injection attacks..."
+    sudo tshark -i $INTERFACE -f "port 80 or port 443 or port 3000" -Y "http" -c 1000 \
+    -T fields -e frame.time -e ip.src -e http.request.uri | \
+    grep -E "('|UNION|SELECT|--|;)" > $LOGDIR/sqli_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to detect XSS
+detect_xss() {
+    echo "[$(date)] Detecting XSS attacks..."
+    sudo tshark -i $INTERFACE -f "port 80 or port 443 or port 3000" -Y "http" -c 1000 \
+    -T fields -e frame.time -e ip.src -e http.request.uri | \
+    grep -E "(<script>|javascript:|onerror|onload|alert\()" > $LOGDIR/xss_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to detect IDOR
+detect_idor() {
+    echo "[$(date)] Detecting IDOR attacks..."
+    sudo tshark -i $INTERFACE -f "port 80 or port 443 or port 3000" -Y "http" -c 1000 \
+    -T fields -e frame.time -e ip.src -e http.request.uri | \
+    grep -E "(id=|user=|file=|../)" > $LOGDIR/idor_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to detect brute force
+detect_brute_force() {
+    echo "[$(date)] Detecting brute force attacks..."
+    sudo tshark -i $INTERFACE -f "port 22 or port 80 or port 443" -c 2000 \
+    -T fields -e frame.time -e ip.src -e tcp.dstport | \
+    awk '{count[$2":"$3]++} END {for (combo in count) if (count[combo] > 20) print "ALERT: Brute force from " combo " (" count[combo] " attempts)"}' \
+    > $LOGDIR/bruteforce_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to detect SYN flood
+detect_syn_flood() {
+    echo "[$(date)] Detecting SYN flood attacks..."
+    sudo tshark -i $INTERFACE -f "tcp[tcpflags] & tcp-syn != 0" -c 5000 \
+    -T fields -e frame.time -e ip.src -e ip.dst | \
+    awk '{count[$3]++} END {for (dst in count) if (count[dst] > 100) print "ALERT: SYN flood to " dst " (" count[dst] " packets)"}' \
+    > $LOGDIR/synflood_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to detect session hijacking
+detect_session_hijacking() {
+    echo "[$(date)] Detecting session hijacking..."
+    sudo tshark -i $INTERFACE -f "port 80 or port 443" -Y "http.cookie" -c 1000 \
+    -T fields -e frame.time -e ip.src -e http.cookie | \
+    grep -E "(PHPSESSID|JSESSIONID|sessionid)" > $LOGDIR/sessions_$(date +%Y%m%d_%H%M%S).log &
+}
+
+# Function to capture evidence
+capture_evidence() {
+    echo "[$(date)] Capturing evidence packets..."
+    sudo tshark -i $INTERFACE -f "host $TARGETS" -w $PCAP_DIR/evidence_$(date +%Y%m%d_%H%M%S).pcap -c 10000 &
+}
+
+# Main execution
+echo "[$(date)] Starting Multi-Attack Detection System..."
+echo "Monitoring targets: $TARGETS"
+echo "Logs will be saved to: $LOGDIR"
+
+detect_sqli
+detect_xss
+detect_idor
+detect_brute_force
+detect_syn_flood
+detect_session_hijacking
+capture_evidence
+
+# Wait for all background processes
+wait
+
+echo "[$(date)] Detection cycle complete. Check logs in $LOGDIR"
+
+# Generate summary report
+echo "[$(date)] Generating detection summary..."
+{
+    echo "=== MULTI-ATTACK DETECTION SUMMARY ==="
+    echo "Scan completed: $(date)"
+    echo ""
+    echo "SQL Injection alerts:"
+    find $LOGDIR -name "sqli_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "XSS alerts:"
+    find $LOGDIR -name "xss_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "IDOR alerts:"
+    find $LOGDIR -name "idor_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "Brute Force alerts:"
+    find $LOGDIR -name "bruteforce_*.log" -exec cat {} \; | grep "ALERT"
+    echo ""
+    echo "SYN Flood alerts:"
+    find $LOGDIR -name "synflood_*.log" -exec cat {} \; | grep "ALERT"
+    echo ""
+    echo "Session data captured:"
+    find $LOGDIR -name "sessions_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " session records"}'
+} > $LOGDIR/summary_$(date +%Y%m%d_%H%M%S).txt
+
+echo "Summary report generated: $LOGDIR/summary_$(date +%Y%m%d_%H%M%S).txt"
+```
+
+This enhanced incident response plan now provides comprehensive detection capabilities for all major attack vectors with detailed explanations of what each filter/query detects and how to identify specific attack patterns.
