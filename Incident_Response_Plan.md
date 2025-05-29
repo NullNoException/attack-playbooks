@@ -23,565 +23,681 @@ This document provides step-by-step instructions for detecting and analyzing the
 
 ---
 
-## 2. Detection of PHP Reverse Shell Attack
+## 1.5. Wireshark Setup and Configuration Guide
 
-### 2.1 Wireshark Detection Procedures
+### 1.5.1 Initial Wireshark Configuration
 
-#### Step 1: Configure Wireshark Capture
+#### Step 1: Network Interface Selection
 
 ```bash
-# Start Wireshark on monitoring node (10.30.0.236)
-sudo wireshark
+# List available interfaces
+sudo wireshark -D
+
+# Start Wireshark with specific interface
+sudo wireshark -i eth0
 ```
 
 **Instructions:**
 
-1. Open Wireshark on the monitoring system
-2. Select network interface connected to target network
-3. Start packet capture before red team attack begins
-4. Apply initial filter: `host 10.30.0.235`
+1. Launch Wireshark as root/administrator
+2. Go to **Capture → Interfaces**
+3. Select the interface connected to the monitored network segment
+4. Configure **Capture Options** → **Promiscuous Mode: Enabled**
+5. Set **Ring Buffer** to 100MB with 10 files for continuous capture
 
-#### Step 2: Detect Reconnaissance Phase
+#### Step 2: Basic Display Filter Syntax
 
-**Filter for netdiscover activity:**
+- **AND operator:** `filter1 and filter2`
+- **OR operator:** `filter1 or filter2`
+- **NOT operator:** `not filter1`
+- **Parentheses:** `(filter1 or filter2) and filter3`
+- **Field comparison:** `tcp.port == 80`
+- **Range matching:** `tcp.port in {80 443 8080}`
+
+#### Step 3: Time-Based Filtering
+
+- **Relative time:** `frame.time_relative >= 10`
+- **Absolute time:** `frame.time >= "2024-01-15 10:00:00"`
+- **Time delta:** `tcp.time_delta > 1.0`
+
+### 1.5.2 Target-Specific Filter Presets
+
+#### Preset 1: DVWA Target Monitoring (10.30.0.235)
+
+```
+host 10.30.0.235 and (tcp or icmp or arp)
+```
+
+#### Preset 2: Juice Shop Target Monitoring (10.30.0.237)
+
+```
+host 10.30.0.237 and tcp.port == 3000
+```
+
+#### Preset 3: Network Reconnaissance Detection
+
+```
+(arp.opcode == 1) or (icmp.type == 8) or (tcp.flags.syn == 1 and tcp.flags.ack == 0)
+```
+
+#### Preset 4: Malicious Traffic Detection
+
+```
+tcp.port in {4444 1234 8080 9999} or http contains "shell" or http contains "cmd"
+```
+
+---
+
+## 2. Detection of PHP Reverse Shell Attack
+
+### 2.1 Wireshark Detection Procedures with Detailed Filtering
+
+#### Step 1: Configure Attack-Specific Capture
+
+**Initial Setup Instructions:**
+
+1. Open Wireshark on monitoring node (10.30.0.236)
+2. Start capture on network interface
+3. Apply broad filter to capture all traffic to DVWA target:
+   ```
+   host 10.30.0.235
+   ```
+
+#### Step 2: Phase-by-Phase Detection Filtering
+
+**Phase 1: Network Discovery (netdiscover)**
+
+**Filter 1A - Basic ARP Traffic:**
 
 ```
 arp
 ```
 
-**Detection Indicators:**
-
-- Multiple ARP requests in short timeframe
-- ARP requests for sequential IP addresses
-- Source MAC address making excessive ARP queries
-
-**Analysis Steps:**
-
-1. Monitor Statistics → Protocol Hierarchy
-2. Look for unusual ARP traffic spikes
-3. Examine ARP request patterns in packet list
-4. Note source MAC addresses performing reconnaissance
-
-#### Step 3: Detect Port Scanning (Nmap)
-
-**Filter for port scanning:**
+**Filter 1B - Excessive ARP Requests:**
 
 ```
-tcp.flags.syn == 1 and tcp.flags.ack == 0 and host 10.30.0.235
+arp.opcode == 1
 ```
 
-**Detection Indicators:**
-
-- Rapid TCP SYN packets to multiple ports
-- Sequential port scanning patterns
-- RST responses from closed ports
-- Stealth scan characteristics (SYN-only packets)
-
-**Analysis Steps:**
-
-1. Apply port scan filter
-2. Check packet timing (rapid succession)
-3. Examine destination ports being scanned
-4. Note scan techniques (TCP Connect vs SYN scan)
-
-#### Step 4: Detect HTTP File Upload
-
-**Filter for HTTP upload activity:**
+**Filter 1C - ARP Requests from Single Source:**
 
 ```
-http.request.method == "POST" and host 10.30.0.235
+arp.opcode == 1 and arp.src.hw_mac == [ATTACKER_MAC]
 ```
 
-**Detection Indicators:**
+**Analysis Instructions:**
 
-- POST requests to upload directories
-- Content-Type: multipart/form-data
-- Large payload sizes
-- PHP file extensions in uploads
+1. Apply Filter 1A and observe ARP request patterns
+2. Go to **Statistics → Protocol Hierarchy** to check ARP traffic percentage
+3. Use **Statistics → Conversations → Ethernet** to identify top MAC addresses
+4. Apply Filter 1B to focus on ARP requests only
+5. Look for sequential IP address scanning patterns in **Info** column
 
-**Analysis Steps:**
+**Phase 2: Port Scanning Detection (Nmap)**
 
-1. Filter for HTTP POST traffic
-2. Right-click packet → Follow → HTTP Stream
-3. Examine uploaded file content
-4. Look for PHP reverse shell signatures:
-   - `exec()`, `shell_exec()`, `system()` functions
-   - Socket connections (`fsockopen`)
-   - `/bin/sh` or `/bin/bash` references
-
-#### Step 5: Detect Reverse Shell Connection
-
-**Filter for reverse shell traffic:**
+**Filter 2A - TCP SYN Scan Detection:**
 
 ```
-tcp.port == 4444 and host 10.30.0.235
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235
 ```
 
-**Detection Indicators:**
+**Filter 2B - Port Scan from Specific Source:**
 
-- Outbound TCP connection from web server
-- Connection to unusual high ports (4444, 1234, etc.)
-- Shell command traffic in TCP streams
-- Base64 encoded commands
-
-**Analysis Steps:**
-
-1. Apply reverse shell port filter
-2. Follow TCP stream of suspicious connections
-3. Look for shell prompt indicators (`$`, `#`)
-4. Examine command execution patterns
-
-### 2.2 Tshark Detection Commands
-
-#### Command 1: Capture and Filter ARP Reconnaissance
-
-```bash
-# Run on monitoring node (10.30.0.236)
-sudo tshark -i eth0 -f "arp" -T fields -e frame.time -e arp.src.proto_ipv4 -e arp.dst.proto_ipv4
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and ip.src == [ATTACKER_IP]
 ```
 
-#### Command 2: Detect Port Scanning
+**Filter 2C - High Port Scan Detection:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235" -Y "tcp.flags.syn == 1 and tcp.flags.ack == 0" -T fields -e frame.time -e ip.src -e tcp.dstport
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and tcp.dstport > 1024
 ```
 
-#### Command 3: Monitor HTTP Upload Activity
+**Filter 2D - Rapid Scanning Pattern:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235 and port 80" -Y "http.request.method == POST" -V
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235 and frame.time_delta < 0.01
 ```
 
-#### Command 4: Capture Reverse Shell Traffic
+**Analysis Instructions:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235 and port 4444" -w reverse_shell_capture.pcap
+1. Apply Filter 2A and check **Statistics → Endpoints → IPv4**
+2. Sort by **Packets** column to identify scanning sources
+3. Use **Statistics → I/O Graphs** to visualize scan timing
+4. Apply Filter 2B with identified attacker IP
+5. Go to **Statistics → Service Response Time → TCP** to analyze response patterns
+6. Check for RST responses indicating closed ports
+
+**Phase 3: HTTP File Upload Detection**
+
+**Filter 3A - HTTP POST Requests:**
+
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235
 ```
 
-#### Command 5: Analyze Shell Commands
+**Filter 3B - File Upload Detection:**
 
-```bash
-sudo tshark -r reverse_shell_capture.pcap -Y "tcp.port == 4444" -T fields -e tcp.payload | xxd -r -p
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http.content_type contains "multipart/form-data"
 ```
 
-### 2.3 Splunk Detection Queries
+**Filter 3C - PHP File Upload:**
 
-#### Query 1: Detect ARP Reconnaissance
-
-```spl
-index=network sourcetype=tcpdump arp
-| stats count by src_mac
-| where count > 50
-| sort -count
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http contains "php"
 ```
 
-#### Query 2: Identify Port Scanning
+**Filter 3D - Large Upload Detection:**
 
-```spl
-index=network dest_ip="10.30.0.235" tcp_flags="S"
-| stats dc(dest_port) as unique_ports by src_ip
-| where unique_ports > 100
+```
+http.request.method == "POST" and ip.dst == 10.30.0.235 and http.content_length > 1000
 ```
 
-#### Query 3: HTTP File Upload Detection
+**Analysis Instructions:**
 
-```spl
-index=web host="10.30.0.235" method="POST" uri_path="*upload*"
-| rex field=form_data "filename=\"(?<filename>[^\"]+)\""
-| where match(filename, "\.php$")
+1. Apply Filter 3A to see all POST requests
+2. Right-click suspicious POST → **Follow → HTTP Stream**
+3. Look for `Content-Disposition: form-data; name="uploaded"` headers
+4. Search for PHP reverse shell indicators:
+   - `exec()`, `shell_exec()`, `system()`, `passthru()`
+   - `fsockopen()`, `socket_create()`
+   - `/bin/sh`, `/bin/bash`
+5. Export HTTP objects: **File → Export Objects → HTTP**
+
+**Phase 4: Reverse Shell Connection Detection**
+
+**Filter 4A - Reverse Shell Port Traffic:**
+
+```
+tcp.port == 4444 and ip.src == 10.30.0.235
 ```
 
-#### Query 4: Reverse Shell Connection Detection
+**Filter 4B - Outbound High Port Connections:**
 
-```spl
-index=network dest_port=4444 src_ip="10.30.0.235"
-| transaction src_ip dest_ip dest_port
-| where duration > 60
 ```
+tcp.flags.syn == 1 and ip.src == 10.30.0.235 and tcp.dstport > 1024
+```
+
+**Filter 4C - Shell Command Traffic:**
+
+```
+tcp.port == 4444 and tcp.len > 0
+```
+
+**Filter 4D - Base64 Encoded Commands:**
+
+```
+tcp.port == 4444 and tcp.payload contains "echo"
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter 4A immediately after file upload
+2. Right-click connection → **Follow → TCP Stream**
+3. Look for shell prompt indicators (`$`, `#`, `root@`)
+4. Check for command execution patterns:
+   - `whoami`, `id`, `uname -a`
+   - `cat /etc/passwd`
+   - `ls -la`
+5. Use **Find Packet** (Ctrl+F) to search for specific commands
+
+#### Step 3: Advanced Filtering Techniques
+
+**Multi-Phase Attack Correlation:**
+
+```
+(arp.opcode == 1) or (tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235) or (http.request.method == "POST" and ip.dst == 10.30.0.235) or (tcp.port == 4444)
+```
+
+**Time-Based Analysis:**
+
+```
+host 10.30.0.235 and frame.time >= "2024-01-15 14:00:00" and frame.time <= "2024-01-15 14:30:00"
+```
+
+**Attack Chain Visualization:**
+
+1. Apply comprehensive filter above
+2. Go to **Statistics → Flow Graph**
+3. Select **TCP Flows** and **IPv4 Address**
+4. Analyze attack progression timeline
 
 ---
 
 ## 3. Detection of Nmap Information Gathering Attack
 
-### 3.1 Wireshark Detection Procedures
+### 3.1 Comprehensive Nmap Detection Filtering
 
-#### Step 1: Basic Nmap Scan Detection
+#### Step 1: Initial Scan Phase Detection
 
-**Filter for comprehensive scanning:**
-
-```
-host 10.30.0.235 and (tcp.flags.syn == 1 or icmp)
-```
-
-**Detection Indicators:**
-
-- ICMP echo requests (ping sweep)
-- TCP SYN packets to multiple ports
-- UDP packets to common service ports
-- Rapid packet succession patterns
-
-#### Step 2: OS Fingerprinting Detection
-
-**Filter for OS detection attempts:**
+**Filter N1A - ICMP Ping Sweep:**
 
 ```
-tcp.window_size_value == 1024 or tcp.options.mss_val < 536 or tcp.urgptr != 0
+icmp.type == 8 and ip.dst_host == 10.30.0.235
 ```
 
-**Detection Indicators:**
+**Filter N1B - TCP Ping Alternative:**
 
-- Unusual TCP window sizes
-- Specific TCP options combinations
-- Crafted packet characteristics
-- ICMP timestamp requests
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and tcp.dstport == 80 and ip.dst == 10.30.0.235
+```
+
+**Filter N1C - UDP Ping Detection:**
+
+```
+udp and ip.dst == 10.30.0.235 and icmp.type == 3
+```
+
+**Analysis Instructions:**
+
+1. Monitor for ICMP echo requests indicating ping sweep
+2. Check **Statistics → ICMP** for unusual request patterns
+3. Look for immediate ICMP replies or timeouts
+4. Use **Statistics → Conversations → IPv4** to identify scanning source
+
+#### Step 2: Port Scanning Techniques Detection
+
+**Filter N2A - TCP Connect Scan:**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235
+```
+
+**Filter N2B - TCP SYN Stealth Scan:**
+
+```
+tcp.flags == 0x02 and ip.dst == 10.30.0.235
+```
+
+**Filter N2C - TCP FIN Scan:**
+
+```
+tcp.flags.fin == 1 and tcp.flags.syn == 0 and tcp.flags.ack == 0 and ip.dst == 10.30.0.235
+```
+
+**Filter N2D - TCP XMAS Scan:**
+
+```
+tcp.flags.fin == 1 and tcp.flags.push == 1 and tcp.flags.urg == 1 and ip.dst == 10.30.0.235
+```
+
+**Filter N2E - TCP NULL Scan:**
+
+```
+tcp.flags == 0x00 and ip.dst == 10.30.0.235
+```
+
+**Filter N2F - UDP Scan:**
+
+```
+udp and ip.dst == 10.30.0.235
+```
+
+**Analysis Instructions:**
+
+1. Apply each filter to identify scan type
+2. Monitor **Statistics → TCP Stream Graphs** for scan patterns
+3. Check for RST responses indicating closed ports
+4. Use **Statistics → Service Response Time** to analyze timing
 
 #### Step 3: Service Version Detection
 
-**Filter for version scanning:**
+**Filter N3A - Service Banner Grabbing:**
 
 ```
-tcp.flags.syn == 1 and tcp.flags.ack == 0 and host 10.30.0.235
+tcp.flags.push == 1 and tcp.len > 0 and ip.dst == 10.30.0.235
 ```
 
-**Follow-up Analysis:**
-
-1. Examine three-way handshake completion rates
-2. Look for immediate connection termination after establishment
-3. Check for service banner grabbing attempts
-
-#### Step 4: Script Scanning Detection
-
-**Filter for NSE script activity:**
+**Filter N3B - HTTP Version Detection:**
 
 ```
-host 10.30.0.235 and (smb or ssh or http or ftp)
+http.request.method == "GET" and http.request.uri == "/" and ip.dst == 10.30.0.235
 ```
 
-**Detection Indicators:**
+**Filter N3C - SSH Version Detection:**
 
-- SMB enumeration packets
-- SSH version negotiation attempts
-- HTTP OPTIONS/HEAD requests
-- FTP banner grabbing
-
-### 3.2 Tshark Detection Commands
-
-#### Command 1: Monitor Ping Sweep
-
-```bash
-sudo tshark -i eth0 -f "icmp" -Y "icmp.type == 8" -T fields -e frame.time -e ip.src -e ip.dst
+```
+tcp.port == 22 and tcp.len > 0 and ip.dst == 10.30.0.235
 ```
 
-#### Command 2: Detect TCP Port Scanning
+**Filter N3D - FTP Banner Grabbing:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235" -Y "tcp.flags.syn == 1 and tcp.flags.ack == 0" -T fields -e frame.time -e ip.src -e tcp.dstport | sort | uniq -c
+```
+tcp.port == 21 and tcp.len > 0 and ip.dst == 10.30.0.235
 ```
 
-#### Command 3: Identify OS Fingerprinting
+**Analysis Instructions:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235" -Y "tcp.window_size_value == 1024 or icmp.type == 13" -V
+1. Look for rapid connection-disconnection patterns
+2. Check for service banners in TCP streams
+3. Monitor for OPTIONS, HEAD requests on HTTP
+4. Analyze immediate connection termination after banner grab
+
+#### Step 4: OS Detection Filtering
+
+**Filter N4A - OS Fingerprinting - Window Size:**
+
+```
+tcp.window_size_value == 1024 and ip.dst == 10.30.0.235
 ```
 
-#### Command 4: Monitor Service Version Detection
+**Filter N4B - OS Fingerprinting - TCP Options:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235" -Y "tcp.flags.syn == 1" -T fields -e ip.src -e tcp.dstport -e tcp.seq | head -100
+```
+tcp.options.mss_val < 536 and ip.dst == 10.30.0.235
 ```
 
-#### Command 5: Capture Script Scanning Activity
+**Filter N4C - ICMP Timestamp Requests:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.235 and (port 139 or port 445 or port 22)" -w nmap_scripts.pcap
+```
+icmp.type == 13 and ip.dst == 10.30.0.235
 ```
 
-### 3.3 Splunk Detection Queries
+**Filter N4D - TCP Sequence Analysis:**
 
-#### Query 1: Ping Sweep Detection
-
-```spl
-index=network icmp_type=8
-| stats dc(dest_ip) as unique_targets by src_ip
-| where unique_targets > 10
-| sort -unique_targets
+```
+tcp.flags.syn == 1 and tcp.seq == 0 and ip.dst == 10.30.0.235
 ```
 
-#### Query 2: Port Scan Identification
+**Analysis Instructions:**
 
-```spl
-index=network dest_ip="10.30.0.235" tcp_flags="S"
-| bucket _time span=1m
-| stats dc(dest_port) as ports_per_minute by _time src_ip
-| where ports_per_minute > 50
+1. Monitor for unusual TCP window sizes
+2. Check TCP options combinations
+3. Look for ICMP timestamp and information requests
+4. Analyze TCP sequence number patterns
+
+#### Step 5: NSE Script Detection
+
+**Filter N5A - SMB Enumeration:**
+
+```
+smb and ip.dst == 10.30.0.235
 ```
 
-#### Query 3: OS Fingerprinting Detection
+**Filter N5B - SMB2 Protocol:**
 
-```spl
-index=network dest_ip="10.30.0.235"
-| where tcp_window_size=1024 OR tcp_window_size=512 OR tcp_window_size=2048
-| stats count by src_ip tcp_window_size
+```
+smb2 and ip.dst == 10.30.0.235
 ```
 
-#### Query 4: Service Enumeration Detection
+**Filter N5C - HTTP Enumeration:**
 
-```spl
-index=network dest_ip="10.30.0.235" (dest_port=139 OR dest_port=445 OR dest_port=22 OR dest_port=21)
-| stats count by src_ip dest_port
-| where count > 5
 ```
+http.request.method in {"OPTIONS" "HEAD" "TRACE"} and ip.dst == 10.30.0.235
+```
+
+**Filter N5D - DNS Enumeration:**
+
+```
+dns and ip.dst == 10.30.0.235
+```
+
+**Analysis Instructions:**
+
+1. Monitor for SMB negotiation packets
+2. Check for directory enumeration attempts
+3. Look for HTTP OPTIONS requests
+4. Analyze DNS reverse lookups
 
 ---
 
 ## 4. Detection of SQL Injection Attack (OWASP Juice Shop)
 
-### 4.1 Wireshark Detection Procedures
+### 4.1 HTTP Traffic Analysis and SQL Injection Detection
 
-#### Step 1: HTTP Traffic Analysis
+#### Step 1: Basic HTTP Traffic Monitoring
 
-**Filter for Juice Shop HTTP traffic:**
-
-```
-host 10.30.0.237 and http
-```
-
-**Detection Indicators:**
-
-- POST requests to `/rest/user/login`
-- GET requests to `/rest/products/search`
-- Unusual HTTP request parameters
-- Error responses (500, 400 status codes)
-
-#### Step 2: SQL Injection Payload Detection
-
-**Filter for suspicious HTTP requests:**
+**Filter S1A - Juice Shop HTTP Traffic:**
 
 ```
-http contains "'" or http contains "UNION" or http contains "SELECT" or http contains "--"
+host 10.30.0.237 and tcp.port == 3000
 ```
 
-**Detection Indicators:**
-
-- SQL keywords in HTTP parameters
-- Single quotes and SQL comments (`--`, `/*`)
-- UNION SELECT statements
-- Database function names
-
-#### Step 3: SQLMap Detection
-
-**Filter for automated tool signatures:**
+**Filter S1B - HTTP Only:**
 
 ```
-http.user_agent contains "sqlmap" or http contains "testpayload"
+http and ip.dst == 10.30.0.237
 ```
 
-**Detection Indicators:**
+**Filter S1C - HTTPS Traffic:**
 
-- SQLMap user agent strings
-- Automated testing patterns
-- Rapid successive requests
-- Error-based injection attempts
+```
+tls and ip.dst == 10.30.0.237 and tcp.port == 3000
+```
 
-#### Step 4: Authentication Bypass Detection
+**Analysis Instructions:**
 
-**Filter for login attempts:**
+1. Monitor all HTTP traffic to Juice Shop
+2. Check **Statistics → HTTP → Requests** for request patterns
+3. Use **Statistics → HTTP → Load Distribution** to identify peaks
+4. Monitor response codes in **Info** column
+
+#### Step 2: Authentication Bypass Detection
+
+**Filter S2A - Login Attempts:**
 
 ```
 http.request.uri contains "/rest/user/login" and http.request.method == "POST"
 ```
 
-**Analysis Steps:**
+**Filter S2B - SQL Injection in Login:**
 
-1. Right-click → Follow HTTP Stream
-2. Examine login request payloads
-3. Look for SQL injection patterns in email field
+```
+http.request.uri contains "/rest/user/login" and http contains "'"
+```
+
+**Filter S2C - Comment-Based Injection:**
+
+```
+http.request.uri contains "/rest/user/login" and http contains "--"
+```
+
+**Filter S2D - Union-Based Injection:**
+
+```
+http contains "UNION" and ip.dst == 10.30.0.237
+```
+
+**Analysis Instructions:**
+
+1. Apply Filter S2A and monitor login frequency
+2. Right-click suspicious requests → **Follow → HTTP Stream**
+3. Look for SQL injection payloads in request body:
+   - `admin@juice-sh.op'--`
+   - `' OR 1=1--`
+   - `' UNION SELECT`
 4. Check response for authentication tokens
+5. Monitor for 200 OK responses to malicious payloads
 
-### 4.2 Tshark Detection Commands
+#### Step 3: Database Enumeration Detection
 
-#### Command 1: Monitor SQL Injection Attempts
+**Filter S3A - Database Keywords:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.237 and port 3000" -Y "http" -T fields -e frame.time -e http.request.uri -e http.request.method | grep -E "(SELECT|UNION|'|--)"
+```
+http contains "SELECT" or http contains "UNION" or http contains "sqlite_master"
 ```
 
-#### Command 2: Capture Login Bypass Attempts
+**Filter S3B - Information Schema Queries:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.237 and port 3000" -Y "http.request.uri contains \"/rest/user/login\"" -V
+```
+http contains "information_schema" and ip.dst == 10.30.0.237
 ```
 
-#### Command 3: Detect SQLMap Activity
+**Filter S3C - Table Enumeration:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.237" -Y "http.user_agent contains \"sqlmap\"" -T fields -e frame.time -e ip.src -e http.user_agent
+```
+http contains "SHOW TABLES" or http contains "sqlite_master" and ip.dst == 10.30.0.237
 ```
 
-#### Command 4: Monitor Database Queries
+**Filter S3D - Column Enumeration:**
 
-```bash
-sudo tshark -i eth0 -f "host 10.30.0.237" -Y "http contains \"sqlite_master\" or http contains \"information_schema\"" -w sqli_detection.pcap
+```
+http contains "DESCRIBE" or http contains "PRAGMA table_info" and ip.dst == 10.30.0.237
 ```
 
-#### Command 5: Extract HTTP Payloads
+**Analysis Instructions:**
 
-```bash
-sudo tshark -r sqli_detection.pcap -Y "http.request.method == POST" -T fields -e http.file_data | xxd -r -p
+1. Monitor for SQL keywords in HTTP requests
+2. Check User-Agent strings for SQLMap signatures
+3. Look for database metadata queries
+4. Analyze response sizes for data extraction indicators
+
+#### Step 4: SQLMap Automated Tool Detection
+
+**Filter S4A - SQLMap User Agent:**
+
+```
+http.user_agent contains "sqlmap"
 ```
 
-### 4.3 Splunk Detection Queries
+**Filter S4B - Automated Testing Patterns:**
 
-#### Query 1: SQL Injection Pattern Detection
-
-```spl
-index=web host="10.30.0.237"
-| rex field=uri_query "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
-| where isnotnull(sqli_indicators)
-| stats count by src_ip sqli_indicators
+```
+http contains "testpayload" or http contains "sqlmap"
 ```
 
-#### Query 2: Authentication Bypass Detection
+**Filter S4C - Error-Based Injection:**
 
-```spl
-index=web host="10.30.0.237" uri_path="/rest/user/login" method="POST"
-| rex field=form_data "email=(?<email_input>[^&]+)"
-| where match(email_input, "('|--|UNION|SELECT)")
-| stats count by src_ip email_input
+```
+http.response.code >= 500 and ip.src == 10.30.0.237
 ```
 
-#### Query 3: SQLMap Tool Detection
+**Filter S4D - Time-Based Injection:**
 
-```spl
-index=web host="10.30.0.237"
-| where match(useragent, "(?i)sqlmap") OR match(uri_query, "testpayload")
-| stats count by src_ip useragent
+```
+http and ip.dst == 10.30.0.237 and http.time > 5
 ```
 
-#### Query 4: Database Enumeration Detection
+**Analysis Instructions:**
 
-```spl
-index=web host="10.30.0.237"
-| where match(uri_query, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)")
-| stats count by src_ip uri_path uri_query
+1. Monitor for SQLMap signatures in requests
+2. Check for rapid successive requests with variations
+3. Look for error responses containing SQL keywords
+4. Analyze response times for time-based injection indicators
+
+#### Step 5: Data Extraction Detection
+
+**Filter S5A - Large HTTP Responses:**
+
+```
+http.content_length > 10000 and ip.src == 10.30.0.237
 ```
 
-#### Query 5: Error-Based SQL Injection
+**Filter S5B - JSON Data Extraction:**
 
-```spl
-index=web host="10.30.0.237" status>=400
-| where match(response_body, "(?i)(sql|database|syntax|mysql|sqlite|oracle)")
-| stats count by src_ip status response_body
 ```
+http contains "password" or http contains "email" and ip.src == 10.30.0.237
+```
+
+**Filter S5C - Base64 Encoded Data:**
+
+```
+http contains "base64" and ip.src == 10.30.0.237
+```
+
+**Filter S5D - Hexadecimal Data:**
+
+```
+http.response and ip.src == 10.30.0.237 and http contains "0x"
+```
+
+**Analysis Instructions:**
+
+1. Monitor for unusually large responses
+2. Check for sensitive data in responses
+3. Look for encoded data extraction
+4. Analyze JSON responses for database dumps
 
 ---
 
-## 5. Comprehensive Detection Dashboard
+## 5. Advanced Wireshark Analysis Techniques
 
-### 5.1 Splunk Dashboard Configuration
+### 5.1 Coloring Rules for Attack Detection
 
-#### Dashboard XML Configuration:
+#### Custom Coloring Rules Setup:
 
-```xml
-<dashboard>
-  <label>Red Team Attack Detection</label>
-  <row>
-    <panel>
-      <title>Network Reconnaissance</title>
-      <single>
-        <search>
-          <query>
-            index=network arp | stats dc(dest_ip) as targets_scanned by src_mac | sort -targets_scanned | head 1
-          </query>
-        </search>
-      </single>
-    </panel>
-    <panel>
-      <title>Port Scanning Activity</title>
-      <chart>
-        <search>
-          <query>
-            index=network tcp_flags="S" dest_ip IN (10.30.0.235, 10.30.0.236, 10.30.0.237)
-            | timechart span=1m count by dest_ip
-          </query>
-        </search>
-      </chart>
-    </panel>
-  </row>
-  <row>
-    <panel>
-      <title>SQL Injection Attempts</title>
-      <table>
-        <search>
-          <query>
-            index=web (host="10.30.0.237" OR host="10.30.0.235")
-            | rex field=uri_query "(?<sqli_pattern>('|UNION|SELECT|--|;))"
-            | where isnotnull(sqli_pattern)
-            | stats count by src_ip uri_path sqli_pattern
-            | sort -count
-          </query>
-        </search>
-      </table>
-    </panel>
-    <panel>
-      <title>Reverse Shell Connections</title>
-      <chart>
-        <search>
-          <query>
-            index=network dest_port IN (4444, 1234, 8080) src_ip IN (10.30.0.235, 10.30.0.236, 10.30.0.237)
-            | timechart span=5m count by dest_port
-          </query>
-        </search>
-      </chart>
-    </panel>
-  </row>
-</dashboard>
+1. Go to **View → Coloring Rules**
+2. Add new rules with following filters:
+
+**Rule 1 - Port Scanning (Red Background):**
+
+```
+tcp.flags.syn == 1 and tcp.flags.ack == 0
 ```
 
-### 5.2 Alert Configuration
+**Rule 2 - SQL Injection (Orange Background):**
 
-#### Alert 1: Port Scanning Detection
-
-```spl
-index=network tcp_flags="S" dest_ip IN (10.30.0.235, 10.30.0.236, 10.30.0.237)
-| stats dc(dest_port) as unique_ports by src_ip
-| where unique_ports > 50
+```
+http contains "'" or http contains "UNION" or http contains "SELECT"
 ```
 
-**Alert Conditions:**
+**Rule 3 - Reverse Shell (Purple Background):**
 
-- Trigger: When unique_ports > 50
-- Time Window: 5 minutes
-- Severity: Medium
-
-#### Alert 2: SQL Injection Detection
-
-```spl
-index=web (host="10.30.0.237" OR host="10.30.0.235")
-| where match(uri_query, "('|UNION|SELECT|--)")
-| stats count by src_ip
-| where count > 5
+```
+tcp.port in {4444 1234 8080 9999}
 ```
 
-**Alert Conditions:**
+**Rule 4 - ARP Scanning (Yellow Background):**
 
-- Trigger: When count > 5
-- Time Window: 1 minute
-- Severity: High
-
-#### Alert 3: Reverse Shell Detection
-
-```spl
-index=network dest_port IN (4444, 1234, 8080) src_ip IN (10.30.0.235, 10.30.0.236, 10.30.0.237)
-| stats count by src_ip dest_ip dest_port
-| where count > 0
+```
+arp.opcode == 1
 ```
 
-**Alert Conditions:**
+### 5.2 Expert Information Analysis
 
-- Trigger: Immediate
-- Time Window: Real-time
-- Severity: Critical
+#### Navigate to Expert Information:
+
+1. Go to **Analyze → Expert Information**
+2. Focus on **Warnings** and **Errors** tabs
+3. Look for:
+   - **TCP Retransmissions** (potential blocking)
+   - **TCP RST** (scan responses)
+   - **HTTP Response Errors** (injection attempts)
+
+### 5.3 Statistical Analysis
+
+#### Key Statistics for Attack Detection:
+
+**Protocol Hierarchy:**
+
+- **Analyze → Statistics → Protocol Hierarchy**
+- Look for unusual protocol distributions
+
+**Conversations Analysis:**
+
+- **Statistics → Conversations → IPv4**
+- Sort by packets to identify top talkers
+
+**Endpoints Analysis:**
+
+- **Statistics → Endpoints → IPv4**
+- Identify suspicious source/destination patterns
+
+**I/O Graphs:**
+
+- **Statistics → I/O Graphs**
+- Visualize attack timing and intensity
+
+### 5.4 Export and Reporting
+
+#### Evidence Collection:
+
+1. **Export Packet Dissections:**
+
+   - **File → Export Packet Dissections → As CSV**
+
+2. **Export HTTP Objects:**
+
+   - **File → Export Objects → HTTP**
+
+3. **Save Filtered Packets:**
+
+   - Apply filter → **File → Export Specified Packets**
+
+4. **Generate Reports:**
+   - **Statistics → Summary** for capture overview
+   - **Statistics → Resolved Addresses** for IP mapping
 
 ---
 
