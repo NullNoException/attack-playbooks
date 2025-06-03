@@ -1281,20 +1281,96 @@ detect_sqli() {
     grep -E "('|UNION|SELECT|--|;)" > $LOGDIR/sqli_$(date +%Y%m%d_%H%M%S).log
 }
 
-# Function to detect reverse shells
-detect_reverse_shell() {
-    echo "[$(date)] Starting reverse shell detection..."
-    sudo tshark -i $INTERFACE -f "port 4444 or port 1234" -c 10 -w $LOGDIR/reverse_shell_$(date +%Y%m%d_%H%M%S).pcap &
+# Function to detect XSS
+detect_xss() {
+    echo "[$(date)] Starting XSS detection..."
+    sudo tshark -i $INTERFACE -f "port 3000 or port 80" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | \
+    grep -E "(<script>|javascript:|onerror|onload|alert\()" > $LOGDIR/xss_$(date +%Y%m%d_%H%M%S).log
+}
+
+# Function to detect IDOR
+detect_idor() {
+    echo "[$(date)] Starting IDOR detection..."
+    sudo tshark -i $INTERFACE -f "port 3000 or port 80" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | \
+    grep -E "(id=|user=|file=|../)" > $LOGDIR/idor_$(date +%Y%m%d_%H%M%S).log
+}
+
+# Function to detect brute force
+detect_brute_force() {
+    echo "[$(date)] Starting brute force detection..."
+    sudo tshark -i $INTERFACE -f "port 22 or port 80 or port 443" -c 2000 \
+    -T fields -e frame.time -e ip.src -e tcp.dstport | \
+    awk '{count[$2":"$3]++} END {for (combo in count) if (count[combo] > 20) print "ALERT: Brute force from " combo " (" count[combo] " attempts)"}' \
+    > $LOGDIR/bruteforce_$(date +%Y%m%d_%H%M%S).log
+}
+
+# Function to detect SYN flood
+detect_syn_flood() {
+    echo "[$(date)] Starting SYN flood detection..."
+    sudo tshark -i $INTERFACE -f "tcp[tcpflags] & tcp-syn != 0" -c 5000 \
+    -T fields -e frame.time -e ip.src -e ip.dst | \
+    awk '{count[$3]++} END {for (dst in count) if (count[dst] > 100) print "ALERT: SYN flood to " dst " (" count[dst] " packets)"}' \
+    > $LOGDIR/synflood_$(date +%Y%m%d_%H%M%S).log
+}
+
+# Function to detect session hijacking
+detect_session_hijacking() {
+    echo "[$(date)] Starting session hijacking detection..."
+    sudo tshark -i $INTERFACE -f "port 80 or port 443" -Y "http.cookie" -c 1000 \
+    -T fields -e frame.time -e ip.src -e http.cookie | \
+    grep -E "(PHPSESSID|JSESSIONID|sessionid)" > $LOGDIR/sessions_$(date +%Y%m%d_%H%M%S).log
+}
+
+# Function to capture evidence
+capture_evidence() {
+    echo "[$(date)] Capturing evidence packets..."
+    sudo tshark -i $INTERFACE -f "host $TARGETS" -w $PCAP_DIR/evidence_$(date +%Y%m%d_%H%M%S).pcap -c 10000 &
 }
 
 # Main execution
 echo "[$(date)] Starting Red Team Attack Detection..."
-detect_port_scan &
-detect_sqli &
-detect_reverse_shell &
+echo "Monitoring targets: $TARGETS"
+echo "Logs will be saved to: $LOGDIR"
 
+detect_sqli
+detect_xss
+detect_idor
+detect_brute_force
+detect_syn_flood
+detect_session_hijacking
+capture_evidence
+
+# Wait for all background processes
 wait
-echo "[$(date)] Detection complete. Check logs in $LOGDIR"
+
+echo "[$(date)] Detection cycle complete. Check logs in $LOGDIR"
+
+# Generate summary report
+echo "[$(date)] Generating detection summary..."
+{
+    echo "=== MULTI-ATTACK DETECTION SUMMARY ==="
+    echo "Scan completed: $(date)"
+    echo ""
+    echo "SQL Injection alerts:"
+    find $LOGDIR -name "sqli_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "XSS alerts:"
+    find $LOGDIR -name "xss_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "IDOR alerts:"
+    find $LOGDIR -name "idor_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " potential incidents"}'
+    echo ""
+    echo "Brute Force alerts:"
+    find $LOGDIR -name "bruteforce_*.log" -exec cat {} \; | grep "ALERT"
+    echo ""
+    echo "SYN Flood alerts:"
+    find $LOGDIR -name "synflood_*.log" -exec cat {} \; | grep "ALERT"
+    echo ""
+    echo "Session data captured:"
+    find $LOGDIR -name "sessions_*.log" -exec wc -l {} \; | awk '{sum+=$1} END {print "Total: " sum " session records"}'
+} > $LOGDIR/summary_$(date +%Y%m%d_%H%M%S).txt
+
+echo "Summary report generated: $LOGDIR/summary_$(date +%Y%m%d_%H%M%S).txt"
 ```
 
 This comprehensive incident response plan provides detailed detection procedures for all red team attacks using Wireshark, Splunk, and tshark across the specified network nodes.
@@ -1459,7 +1535,7 @@ http.request.uri contains "../" or http.request.uri contains "..%2F" or http.req
 #### Command I1: Monitor ID Parameter Manipulation
 
 ```bash
-sudo tshark -i eth0 -f "port 80 or port 443 or port 3000" -Y "http.request.uri contains \"id=\"" -T fields -e frame.time -e ip.src -e http.request.uri
+sudo tshark -i eth0 -f "port 80 or port 443" -Y "http.request.uri contains \"id=\"" -T fields -e frame.time -e ip.src -e http.request.uri
 ```
 
 #### Command I2: Detect Directory Traversal
@@ -1782,7 +1858,7 @@ sudo tshark -i eth0 -f "port 22" -T fields -e frame.time -e ip.src -e ip.dst | s
 #### Query B1: HTTP Brute Force Detection
 
 ```spl
-index=web uri_path contains "login" method="POST"
+index=main uri_path="*login*" method="POST"
 | stats count as attempts by src_ip
 | where attempts > 20
 | sort -attempts
@@ -1804,7 +1880,7 @@ index=network dest_port=22 tcp_flags="S"
 #### Query B3: Failed Login Pattern Detection
 
 ```spl
-index=web uri_path contains "login" (status=401 OR status=403)
+index=main uri_path="*login*" (status=401 OR status=403)
 | stats count as failed_attempts by src_ip
 | where failed_attempts > 15
 ```
@@ -1814,7 +1890,7 @@ index=web uri_path contains "login" (status=401 OR status=403)
 #### Query B4: Password Spraying Detection
 
 ```spl
-index=web uri_path contains "login" method="POST"
+index=main uri_path="*login*" method="POST"
 | rex field=form_data "username=(?<username>[^&]+)"
 | stats dc(username) as unique_users, count as attempts by src_ip
 | where unique_users > 5 AND attempts > 20
@@ -1825,7 +1901,7 @@ index=web uri_path contains "login" method="POST"
 #### Query B5: Credential Stuffing Detection
 
 ```spl
-index=web uri_path contains "login" method="POST"
+index=main uri_path="*login*" method="POST"
 | stats count as attempts, dc(user_agent) as unique_agents by src_ip
 | where attempts > 50 AND unique_agents = 1
 ```
@@ -2109,16 +2185,14 @@ detect_sqli() {
 # Function to detect XSS
 detect_xss() {
     echo "[$(date)] Detecting XSS attacks..."
-    sudo tshark -i $INTERFACE -f "port 80 or port 443 or port 3000" -Y "http" -c 1000 \
-    -T fields -e frame.time -e ip.src -e http.request.uri | \
+    sudo tshark -i $INTERFACE -f "port 3000 or port 80" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | \
     grep -E "(<script>|javascript:|onerror|onload|alert\()" > $LOGDIR/xss_$(date +%Y%m%d_%H%M%S).log &
 }
 
 # Function to detect IDOR
 detect_idor() {
     echo "[$(date)] Detecting IDOR attacks..."
-    sudo tshark -i $INTERFACE -f "port 80 or port 443 or port 3000" -Y "http" -c 1000 \
-    -T fields -e frame.time -e ip.src -e http.request.uri | \
+    sudo tshark -i $INTERFACE -f "port 3000 or port 80" -Y "http" -T fields -e frame.time -e ip.src -e http.request.uri | \
     grep -E "(id=|user=|file=|../)" > $LOGDIR/idor_$(date +%Y%m%d_%H%M%S).log &
 }
 
