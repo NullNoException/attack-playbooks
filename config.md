@@ -198,18 +198,21 @@ def install_sshpass():
         return False
 
 if __name__ == "__main__":
+    SPLUNK_SERVER_IP = "<SPLUNK_SERVER_IP>"
+    if SPLUNK_SERVER_IP == "<SPLUNK_SERVER_IP>":
+        raise ValueError("Please set SPLUNK_SERVER_IP to the actual IP address of your Splunk server.")
     # 0. First install sshpass
     install_sshpass()
 
     # 1. Configure pfSense remote logging (manual)
-    configure_pfsense_remote_logging("<SPLUNK_SERVER_IP>")
+    configure_pfsense_remote_logging(SPLUNK_SERVER_IP)
 
     # 2. Find Suricata interface on pfSense
-    # interface = get_suricata_interface("admin", "labadmin")
+    interface = get_suricata_interface("admin", "labadmin")
 
     # 3. SSH to pfSense (192.168.0.1) and configure Splunk Forwarder
-    # configure_splunk_forwarder_on_pfsense(interface, "<SPLUNK_SERVER_IP>", "admin", "labadmin")
+    configure_splunk_forwarder_on_pfsense(interface, SPLUNK_SERVER_IP, "admin", "labadmin")
 
     # 4. SSH to Splunk Server and configure inputs.conf
-    # configure_splunk_server("<SPLUNK_SERVER_IP>", "labadmin", "labadmin")
+    configure_splunk_server(SPLUNK_SERVER_IP, "labadmin", "labadmin")
 ```
