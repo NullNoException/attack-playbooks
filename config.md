@@ -126,9 +126,9 @@ defaultGroup=my_indexers
 server={splunk_server_ip}:9997
 """
     cmds = [
-        f"echo '{inputs_conf}' > /opt/splunkforwarder/etc/system/local/inputs.conf",
-        f"echo '{outputs_conf}' > /opt/splunkforwarder/etc/system/local/outputs.conf",
-        "/opt/splunkforwarder/bin/splunk restart"
+        f"echo '{inputs_conf}' | sudo tee /opt/splunkforwarder/etc/system/local/inputs.conf > /dev/null",
+        f"echo '{outputs_conf}' | sudo tee /opt/splunkforwarder/etc/system/local/outputs.conf > /dev/null",
+        "sudo /opt/splunkforwarder/bin/splunk restart"
     ]
     # This SSH command is run from your admin/management machine to pfSense
     ssh_and_run(pfsense_ip, pfsense_user, pfsense_pass, cmds)
@@ -142,8 +142,8 @@ connection_host = none
 compressed = true
 """
     cmds = [
-        f"echo '{inputs_conf}' > /opt/splunk/etc/system/local/inputs.conf",
-        "/opt/splunk/bin/splunk restart"
+        f"echo '{inputs_conf}' | sudo tee /opt/splunk/etc/system/local/inputs.conf > /dev/null",
+        "sudo /opt/splunk/bin/splunk restart"
     ]
     # This SSH command is run from your admin/management machine to Splunk server
     ssh_and_run(splunk_server_ip, splunk_user, splunk_pass, cmds)
@@ -169,16 +169,43 @@ def get_suricata_interface(pfsense_user, pfsense_pass):
     print("No Suricata interface found.")
     return None
 
+def install_sshpass():
+    """
+    Install sshpass if it's not already installed.
+    """
+    print("Checking and installing sshpass...")
+    # Check if sshpass is already installed
+    check_cmd = "which sshpass"
+    check_result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
+
+    if check_result.returncode == 0:
+        print("sshpass is already installed.")
+        return True
+
+    # Install sshpass
+    install_cmd = "sudo apt update && sudo apt install -y sshpass"
+    install_result = run_cmd(install_cmd)
+
+    if install_result.returncode == 0:
+        print("Successfully installed sshpass.")
+        return True
+    else:
+        print("Failed to install sshpass. Please install it manually.")
+        return False
+
 if __name__ == "__main__":
+    # 0. First install sshpass
+    install_sshpass()
+
     # 1. Configure pfSense remote logging (manual)
     configure_pfsense_remote_logging("<SPLUNK_SERVER_IP>")
 
     # 2. Find Suricata interface on pfSense
-    # interface = get_suricata_interface("<PFSENSE_USER>", "<PFSENSE_PASS>")
+    # interface = get_suricata_interface("admin", "labadmin")
 
     # 3. SSH to pfSense (192.168.0.1) and configure Splunk Forwarder
-    # configure_splunk_forwarder_on_pfsense(interface, "<SPLUNK_SERVER_IP>", "<PFSENSE_USER>", "<PFSENSE_PASS>")
+    # configure_splunk_forwarder_on_pfsense(interface, "<SPLUNK_SERVER_IP>", "admin", "labadmin")
 
     # 4. SSH to Splunk Server and configure inputs.conf
-    # configure_splunk_server("<SPLUNK_SERVER_IP>", "<SPLUNK_USER>", "<SPLUNK_PASS>")
+    # configure_splunk_server("<SPLUNK_SERVER_IP>", "labadmin", "labadmin")
 ```
