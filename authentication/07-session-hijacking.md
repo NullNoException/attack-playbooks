@@ -318,7 +318,7 @@ class SQLInjectionTester:
         return False
 
 if __name__ == "__main__":
-    tester = SQLInjectionTester("http://localhost/dvwa/vulnerabilities/sqli/")
+    tester = SQLInjectionTester("http://10.30.0.235/dvwa/vulnerabilities/sqli/")
     tester.test_parameter("id", "1")
 ```
 

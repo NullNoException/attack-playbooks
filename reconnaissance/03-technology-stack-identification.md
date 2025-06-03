@@ -481,10 +481,10 @@ class VulnerabilityScanner:
 
 if __name__ == "__main__":
     targets = [
-        "http://localhost:3000",      # Juice Shop
-        "http://localhost/dvwa",      # DVWA
-        "http://localhost/xvwa",      # XVWA
-        "http://localhost:8080/WebGoat"  # WebGoat
+        "http://10.30.0.237:3000",      # Juice Shop
+        "http://10.30.0.235/dvwa",      # DVWA
+        "http://10.30.0.237:3001/xvwa",      # XVWA
+        "http://10.30.0.237:8080/WebGoat"  # WebGoat
     ]
 
     for target in targets:
