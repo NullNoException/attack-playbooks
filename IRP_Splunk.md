@@ -2,7 +2,7 @@
 
 ## 1. Splunk Index Discovery and Configuration
 
-...existing code from section 1.7...
+...existing code...
 
 ## 2. Splunk Detection Queries
 
@@ -16,81 +16,53 @@ index=main sourcetype=tcpdump arp
 ```
 
 ```spl
-index=main dest_ip="10.30.0.235" tcp_flags="S"
+index=main tcp_flags="S"
 | stats dc(dest_port) as unique_ports by src_ip
 | where unique_ports > 100
 ```
 
 ```spl
-index=main host="10.30.0.235" method="POST" uri_path="*upload*"
+index=main method="POST" uri_path="*upload*"
 | rex field=form_data "filename=\"(?<filename>[^\"]+)\""
 | where match(filename, "\.php$")
 ```
 
 ```spl
-index=main dest_port=4444 src_ip="10.30.0.235"
+index=main
 | transaction src_ip dest_ip dest_port
-| where duration > 60
-```
-
-### Nmap Information Gathering Detection
-
-```spl
-index=main icmp_type=8
-| stats dc(dest_ip) as unique_targets by src_ip
-| where unique_targets > 10
-| sort - unique_targets
-```
-
-```spl
-index=main dest_ip="10.30.0.235" tcp_flags="S"
-| bucket _time span=1m
-| stats dc(dest_port) as ports_per_minute by _time src_ip
-| where ports_per_minute > 50
-```
-
-```spl
-index=main dest_ip="10.30.0.235"
-| where tcp_window_size=1024 OR tcp_window_size=512 OR tcp_window_size=2048
-| stats count by src_ip tcp_window_size
-```
-
-```spl
-index=main dest_ip="10.30.0.235" (dest_port=139 OR dest_port=445 OR dest_port=22 OR dest_port=21)
-| stats count by src_ip dest_port
-| where count > 5
+| where dest_port IN (4444, 1234, 8080) AND duration > 60
 ```
 
 ### SQL Injection Detection
 
 ```spl
-index=main host="10.30.0.237"
+index=main (uri_path="/rest/user/login" OR uri_path="/rest/products/search" OR uri_path="/rest/track-order/*")
 | rex field=uri_query "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
 | where isnotnull(sqli_indicators)
-| stats count by src_ip sqli_indicators
+| stats count by src_ip sqli_indicators uri_path
 ```
 
 ```spl
-index=main host="10.30.0.237" uri_path="/rest/user/login" method="POST"
+index=main uri_path="/rest/user/login" method="POST"
 | rex field=form_data "email=(?<email_input>[^&]+)"
 | where match(email_input, "('|--|UNION|SELECT)")
 | stats count by src_ip email_input
 ```
 
 ```spl
-index=main host="10.30.0.237"
+index=main
 | where match(useragent, "(?i)sqlmap") OR match(uri_query, "testpayload")
 | stats count by src_ip useragent
 ```
 
 ```spl
-index=main host="10.30.0.237"
+index=main
 | where match(uri_query, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)")
 | stats count by src_ip uri_path uri_query
 ```
 
 ```spl
-index=main host="10.30.0.237" status>=400
+index=main status>=400
 | where match(response_body, "(?i)(sql|database|syntax|mysql|sqlite|oracle)")
 | stats count by src_ip status response_body
 ```
