@@ -95,20 +95,20 @@ Kali Linux as attacking machine; Metasploitable2 as vulnerable target; Nmap for 
 
 ## Command
 
-- Network discovery: Identify live hosts on network
-  Command: `nmap 192.168.1.0/24`
-- Ping sweep: Quick host discovery
-  Command: `nmap -sn 192.168.1.0/24`
-- Port scanning: Identify open services
-  Command: `nmap -p 1-1024 10.30.0.235`
+- Network discovery: Identify specific target hosts
+  Command: `nmap 10.30.0.235 10.30.0.236 10.30.0.237`
+- Ping sweep: Quick target host discovery
+  Command: `nmap -sn 10.30.0.235 10.30.0.236 10.30.0.237`
+- Port scanning: Identify open services on specific ports
+  Command: `nmap -p 1-1024,3000-4000 10.30.0.235 10.30.0.236 10.30.0.237`
 - Service version detection: Fingerprint running services
-  Command: `nmap -sV -T4 10.30.0.235`
+  Command: `nmap -sV -p 1-1024,3000-4000 -T4 10.30.0.235 10.30.0.236 10.30.0.237`
 - OS detection: Identify target operating system
-  Command: `sudo nmap -O 10.30.0.235`
+  Command: `sudo nmap -O -p 1-1024,3000-4000 10.30.0.235 10.30.0.236 10.30.0.237`
 - Vulnerability scanning: Check for known vulnerabilities
-  Command: `sudo nmap --script vuln 10.30.0.235`
+  Command: `sudo nmap --script vuln -p 1-1024,3000-4000 10.30.0.235 10.30.0.236 10.30.0.237`
 - SMB enumeration: Gather SMB service information
-  Command: `nmap --script smb-enum-shares,smb-enum-users 10.30.0.235`
+  Command: `nmap --script smb-enum-shares,smb-enum-users -p 139,445 10.30.0.235 10.30.0.236 10.30.0.237`
 
 ## Example
 

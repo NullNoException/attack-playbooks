@@ -98,6 +98,8 @@ def run_cmd(cmd, cwd=None):
 def ssh_and_run(host, user, password, commands):
     """
     SSH to host and run a list of shell commands using sshpass.
+    This function should be run from your management/admin machine,
+    NOT from pfSense or Splunk themselves.
     """
     for cmd in commands:
         ssh_cmd = (
@@ -128,6 +130,7 @@ server={splunk_server_ip}:9997
         f"echo '{outputs_conf}' > /opt/splunkforwarder/etc/system/local/outputs.conf",
         "/opt/splunkforwarder/bin/splunk restart"
     ]
+    # This SSH command is run from your admin/management machine to pfSense
     ssh_and_run(pfsense_ip, pfsense_user, pfsense_pass, cmds)
 
 def configure_splunk_server(splunk_server_ip, splunk_user, splunk_pass):
@@ -142,15 +145,40 @@ compressed = true
         f"echo '{inputs_conf}' > /opt/splunk/etc/system/local/inputs.conf",
         "/opt/splunk/bin/splunk restart"
     ]
+    # This SSH command is run from your admin/management machine to Splunk server
     ssh_and_run(splunk_server_ip, splunk_user, splunk_pass, cmds)
+
+def get_suricata_interface(pfsense_user, pfsense_pass):
+    """
+    SSH to pfSense and find the Suricata interface name by listing /var/log/suricata.
+    Returns the interface string (e.g., 'em3').
+    """
+    pfsense_ip = "192.168.0.1"
+    list_cmd = "ls /var/log/suricata"
+    ssh_cmd = (
+        f"sshpass -p '{pfsense_pass}' ssh -o StrictHostKeyChecking=no {pfsense_user}@{pfsense_ip} \"{list_cmd}\""
+    )
+    result = subprocess.run(ssh_cmd, shell=True, capture_output=True, text=True)
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            if line.startswith("suricata_"):
+                # Extract interface name after 'suricata_'
+                iface = line.replace("suricata_", "").strip("/")
+                print(f"Found Suricata interface: {iface}")
+                return iface
+    print("No Suricata interface found.")
+    return None
 
 if __name__ == "__main__":
     # 1. Configure pfSense remote logging (manual)
     configure_pfsense_remote_logging("<SPLUNK_SERVER_IP>")
 
-    # 2. SSH to pfSense (192.168.0.1) and configure Splunk Forwarder
-    # configure_splunk_forwarder_on_pfsense("<INTERFACE>", "<SPLUNK_SERVER_IP>", "<PFSENSE_USER>", "<PFSENSE_PASS>")
+    # 2. Find Suricata interface on pfSense
+    # interface = get_suricata_interface("<PFSENSE_USER>", "<PFSENSE_PASS>")
 
-    # 3. SSH to Splunk Server and configure inputs.conf
+    # 3. SSH to pfSense (192.168.0.1) and configure Splunk Forwarder
+    # configure_splunk_forwarder_on_pfsense(interface, "<SPLUNK_SERVER_IP>", "<PFSENSE_USER>", "<PFSENSE_PASS>")
+
+    # 4. SSH to Splunk Server and configure inputs.conf
     # configure_splunk_server("<SPLUNK_SERVER_IP>", "<SPLUNK_USER>", "<SPLUNK_PASS>")
 ```
