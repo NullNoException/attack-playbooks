@@ -106,10 +106,11 @@ def ssh_and_run(host, user, password, commands):
         run_cmd(ssh_cmd)
 
 def configure_pfsense_remote_logging(splunk_server_ip):
-    print("Manual step: Go to pfSense web UI and set Remote Log Servers to {}:9997".format(splunk_server_ip))
+    print("Manual step: Go to pfSense web UI at http://192.168.0.1/status_logs_settings.php and set Remote Log Servers to {}:9997".format(splunk_server_ip))
 
-def configure_splunk_forwarder_on_pfsense(pfsense_ip, pfsense_user, pfsense_pass, interface, splunk_server_ip):
-    # Write inputs.conf and outputs.conf remotely
+def configure_splunk_forwarder_on_pfsense(interface, splunk_server_ip, pfsense_user, pfsense_pass):
+    # pfSense IP is always 192.168.0.1
+    pfsense_ip = "192.168.0.1"
     inputs_conf = f"""
 [monitor:///var/log/suricata/suricata_{interface}/eve.json]
 sourcetype = suricata
@@ -147,8 +148,8 @@ if __name__ == "__main__":
     # 1. Configure pfSense remote logging (manual)
     configure_pfsense_remote_logging("<SPLUNK_SERVER_IP>")
 
-    # 2. SSH to pfSense and configure Splunk Forwarder
-    # configure_splunk_forwarder_on_pfsense("<PFSENSE_IP>", "<PFSENSE_USER>", "<PFSENSE_PASS>", "<INTERFACE>", "<SPLUNK_SERVER_IP>")
+    # 2. SSH to pfSense (192.168.0.1) and configure Splunk Forwarder
+    # configure_splunk_forwarder_on_pfsense("<INTERFACE>", "<SPLUNK_SERVER_IP>", "<PFSENSE_USER>", "<PFSENSE_PASS>")
 
     # 3. SSH to Splunk Server and configure inputs.conf
     # configure_splunk_server("<SPLUNK_SERVER_IP>", "<SPLUNK_USER>", "<SPLUNK_PASS>")
