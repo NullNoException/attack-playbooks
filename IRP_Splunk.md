@@ -37,13 +37,15 @@ index=main
 
 ```spl
 index=main (url="/rest/user/login" OR url="/rest/products/search" OR url="/rest/track-order/*")
-| rex field=uri_query "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
+| regex _raw="(?i)(select\s+|union\s+select|insert\s+into|update\s+.+?set|delete\s+from|drop\s+table|alter\s+table|exec\s+|'.*?(\s+|\+)or(\s+|\+).*?=|'.*?(\s+|\+)and(\s+|\+)|like\s+['\"][%_]|\/\*.*?\*\/|;\s*--|information_schema|sys\.tables|waitfor\s+delay|sleep\s*\(\s*\d+)"
+| rex field=url "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
 | where isnotnull(sqli_indicators)
 | stats count by src_ip sqli_indicators url
 ```
 
 ```spl
 index=main sourcetype="suricata" method="POST" url="*login*"
+| regex _raw="(?i)(select\s+|union\s+select|'.*?(\s+|\+)or(\s+|\+).*?=|'.*?(\s+|\+)and(\s+|\+)|;\s*--|\b1=1\b)"
 | rex field=form_data "email=(?<email_input>[^&]+)"
 | where match(email_input, "('|--|UNION|SELECT)")
 | stats count by src_ip email_input
