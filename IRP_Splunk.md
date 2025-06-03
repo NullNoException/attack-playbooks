@@ -22,7 +22,7 @@ index=main tcp_flags="S"
 ```
 
 ```spl
-index=main method="POST" uri_path="*upload*"
+index=main method="POST" url="*upload*"
 | rex field=form_data "filename=\"(?<filename>[^\"]+)\""
 | where match(filename, "\.php$")
 ```
@@ -36,50 +36,50 @@ index=main
 ### SQL Injection Detection
 
 ```spl
-index=main (uri_path="/rest/user/login" OR uri_path="/rest/products/search" OR uri_path="/rest/track-order/*")
+index=main (url="/rest/user/login" OR url="/rest/products/search" OR url="/rest/track-order/*")
 | rex field=uri_query "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
 | where isnotnull(sqli_indicators)
-| stats count by src_ip sqli_indicators uri_path
+| stats count by src_ip sqli_indicators url
 ```
 
 ```spl
-index=main uri_path="/rest/user/login" method="POST"
+index=main sourcetype="suricata" method="POST" url="*login*"
 | rex field=form_data "email=(?<email_input>[^&]+)"
 | where match(email_input, "('|--|UNION|SELECT)")
 | stats count by src_ip email_input
 ```
 
 ```spl
-index=main
-| where match(useragent, "(?i)sqlmap") OR match(uri_query, "testpayload")
+index=main sourcetype="suricata"
+| where match(useragent, "(?i)sqlmap") OR match(query, "testpayload") OR match(url, "testpayload")
 | stats count by src_ip useragent
 ```
 
 ```spl
-index=main
-| where match(uri_query, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)")
-| stats count by src_ip uri_path uri_query
+index=main sourcetype="suricata"
+| where match(query, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)") OR match(url, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)")
+| stats count by src_ip url
 ```
 
 ```spl
-index=main status>=400
-| where match(response_body, "(?i)(sql|database|syntax|mysql|sqlite|oracle)")
-| stats count by src_ip status response_body
+index=main sourcetype="suricata" status>=400
+| where match(response, "(?i)(sql|database|syntax|mysql|sqlite|oracle)")
+| stats count by src_ip status response
 ```
 
 ### XSS Detection
 
 ```spl
-index=main
-| rex field=uri_query "(?<xss_indicators>(<script>|javascript:|onerror|onload|alert\(|document\.cookie))"
+index=main sourcetype="suricata"
+| rex field=url "(?<xss_indicators>(<script>|javascript:|onerror|onload|alert\(|document\.cookie))"
 | where isnotnull(xss_indicators)
-| stats count by src_ip xss_indicators uri_path
+| stats count by src_ip xss_indicators url
 ```
 
 ```spl
 index=main
 | where match(uri_query, "(?i)(document\.cookie|document\.location|window\.location)")
-| stats count by src_ip uri_path form_data
+| stats count by src_ip url form_data
 ```
 
 ```spl
@@ -93,7 +93,7 @@ index=main method="GET"
 index=main method="POST"
 | rex field=form_data "(?<xss_payload>(<script>|javascript:|onerror)[^&]*)"
 | where isnotnull(xss_payload)
-| stats count by src_ip xss_payload uri_path
+| stats count by src_ip xss_payload url
 ```
 
 ```spl
@@ -108,14 +108,14 @@ index=main
 index=main
 | rex field=uri_query "(?<object_refs>(id=|user=|file=|account=)(?<ref_value>\d+))"
 | where isnotnull(object_refs)
-| eventstats dc(ref_value) as unique_refs by src_ip uri_path
+| eventstats dc(ref_value) as unique_refs by src_ip url
 | where unique_refs > 10
-| stats count by src_ip uri_path object_refs
+| stats count by src_ip url object_refs
 ```
 
 ```spl
 index=main status=200
-| where match(uri_path, "(?i)(admin|profile|account|user)")
+| where match(url, "(?i)(admin|profile|account|user)")
 | where match(uri_query, "(id=|user=)")
 | stats dc(uri_query) as unique_access by src_ip
 | where unique_access > 5
@@ -124,14 +124,14 @@ index=main status=200
 ```spl
 index=main
 | where match(uri_query, "(?i)(\.\.\/|\.\.%2F|\.\.%5C)")
-| stats count by src_ip uri_query uri_path
+| stats count by src_ip uri_query url
 ```
 
 ```spl
 index=main
-| where match(uri_path, "(?i)(admin|manager|root)")
+| where match(url, "(?i)(admin|manager|root)")
 | where NOT match(user_role, "(?i)(admin|administrator)")
-| stats count by src_ip user_id uri_path
+| stats count by src_ip user_id url
 ```
 
 ### Phishing Detection
@@ -140,7 +140,7 @@ index=main
 index=main
 | where match(host, "(?i)(security|verify|update|account|confirm)")
 | where NOT match(host, "(legitimate-domain\.com|trusted-site\.org)")
-| stats count by src_ip host uri_path
+| stats count by src_ip host url
 ```
 
 ```spl
@@ -197,7 +197,7 @@ index=main tcp_flags="S" dest_ip="10.30.0.235"
 ### Brute Force Detection
 
 ```spl
-index=main uri_path="*login*" method="POST"
+index=main url="*login*" method="POST"
 | stats count as attempts by src_ip
 | where attempts > 20
 | sort -attempts
@@ -211,20 +211,20 @@ index=main dest_port=22 tcp_flags="S"
 ```
 
 ```spl
-index=main uri_path="*login*" (status=401 OR status=403)
+index=main url="*login*" (status=401 OR status=403)
 | stats count as failed_attempts by src_ip
 | where failed_attempts > 15
 ```
 
 ```spl
-index=main uri_path="*login*" method="POST"
+index=main url="*login*" method="POST"
 | rex field=form_data "username=(?<username>[^&]+)"
 | stats dc(username) as unique_users, count as attempts by src_ip
 | where unique_users > 5 AND attempts > 20
 ```
 
 ```spl
-index=main uri_path="*login*" method="POST"
+index=main url="*login*" method="POST"
 | stats count as attempts, dc(user_agent) as unique_agents by src_ip
 | where attempts > 50 AND unique_agents = 1
 ```
@@ -264,7 +264,7 @@ index=main
 ```
 
 ```spl
-index=main uri_path="*login*"
+index=main url="*login*"
 | rex field=response_headers "Set-Cookie: (?<new_session>[^;]+)"
 | rex field=cookie "(?<old_session>[^;]+)"
 | where new_session = old_session
