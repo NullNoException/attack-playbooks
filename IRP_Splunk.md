@@ -51,8 +51,8 @@ index=main sourcetype=* method=POST
 
 ```spl
 index=main sourcetype=*
-| search useragent="*sqlmap*" OR _raw="*sqlmap*" OR url="*testpayload*"
-| table _time src_ip dest_ip url useragent _raw
+| search http_user_agent="*sqlmap*" OR _raw="*sqlmap*" OR url="*testpayload*"
+| table _time src_ip dest_ip url http_user_agent _raw
 | sort -_time
 ```
 
@@ -253,7 +253,7 @@ index=main
 index=main
 | rex field=cookie "sessionid=(?<session_token>[^;]+)"
 | where isnotnull(session_token)
-| stats values(src_ip) as source_ips, values(user_agent) as user_agents by session_token
+| stats values(src_ip) as source_ips, values(http_user_agent) as user_agents by session_token
 | where mvcount(source_ips) > 1 OR mvcount(user_agents) > 1
 ```
 
