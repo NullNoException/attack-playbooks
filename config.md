@@ -102,8 +102,9 @@ def ssh_and_run(host, user, password, commands):
     NOT from pfSense or Splunk themselves.
     """
     for cmd in commands:
+        # Use -t to allocate a pseudo-terminal which allows password prompts for sudo
         ssh_cmd = (
-            f"sshpass -p '{password}' ssh -o StrictHostKeyChecking=no {user}@{host} \"{cmd}\""
+            f"sshpass -p '{password}' ssh -t -o StrictHostKeyChecking=no {user}@{host} \"{cmd}\""
         )
         run_cmd(ssh_cmd)
 
@@ -141,9 +142,12 @@ sourcetype = suricata
 connection_host = none
 compressed = true
 """
+    # These commands avoid using sudo directly
     cmds = [
-        f"echo '{inputs_conf}' | sudo tee /opt/splunk/etc/system/local/inputs.conf > /dev/null",
-        "sudo /opt/splunk/bin/splunk restart"
+        f"echo '{inputs_conf}' > /tmp/inputs.conf",
+        f"echo '{splunk_pass}' | sudo -S cp /tmp/inputs.conf /opt/splunk/etc/system/local/inputs.conf",
+        f"echo '{splunk_pass}' | sudo -S /opt/splunk/bin/splunk restart",
+        "rm /tmp/inputs.conf"
     ]
     # This SSH command is run from your admin/management machine to Splunk server
     ssh_and_run(splunk_server_ip, splunk_user, splunk_pass, cmds)
