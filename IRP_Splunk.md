@@ -36,37 +36,38 @@ index=main
 ### SQL Injection Detection
 
 ```spl
-index=main (url="/rest/user/login" OR url="/rest/products/search" OR url="/rest/track-order/*")
-| regex _raw="(?i)(select\s+|union\s+select|insert\s+into|update\s+.+?set|delete\s+from|drop\s+table|alter\s+table|exec\s+|'.*?(\s+|\+)or(\s+|\+).*?=|'.*?(\s+|\+)and(\s+|\+)|like\s+['\"][%_]|\/\*.*?\*\/|;\s*--|information_schema|sys\.tables|waitfor\s+delay|sleep\s*\(\s*\d+)"
-| rex field=url "(?<sqli_indicators>('|\"|UNION|SELECT|INSERT|UPDATE|DELETE|DROP|--|\*|;))"
-| where isnotnull(sqli_indicators)
-| stats count by src_ip sqli_indicators url
+index=main sourcetype=* (url="*login*" OR url="*/rest/products/search*" OR url="*/rest/track-order/*")
+| search _raw="*SELECT*" OR _raw="*UNION*" OR _raw="*INSERT*" OR _raw="*UPDATE*" OR _raw="*DELETE*" OR _raw="*DROP*" OR _raw="*--*" OR _raw="*'*" OR _raw="*;*"
+| table _time src_ip dest_ip url _raw
+| sort -_time
 ```
 
 ```spl
-index=main sourcetype="suricata" method="POST" url="*login*"
-| regex _raw="(?i)(select\s+|union\s+select|'.*?(\s+|\+)or(\s+|\+).*?=|'.*?(\s+|\+)and(\s+|\+)|;\s*--|\b1=1\b)"
-| rex field=form_data "email=(?<email_input>[^&]+)"
-| where match(email_input, "('|--|UNION|SELECT)")
-| stats count by src_ip email_input
+index=main sourcetype=* method=POST
+| search _raw="*SELECT*" OR _raw="*UNION*" OR _raw="*'*" OR _raw="*--*" OR _raw="*1=1*" OR _raw="*OR 1*"
+| table _time src_ip dest_ip url form* _raw
+| sort -_time
 ```
 
 ```spl
-index=main sourcetype="suricata"
-| where match(useragent, "(?i)sqlmap") OR match(query, "testpayload") OR match(url, "testpayload")
-| stats count by src_ip useragent
+index=main sourcetype=*
+| search useragent="*sqlmap*" OR _raw="*sqlmap*" OR url="*testpayload*"
+| table _time src_ip dest_ip url useragent _raw
+| sort -_time
 ```
 
 ```spl
-index=main sourcetype="suricata"
-| where match(query, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)") OR match(url, "(?i)(sqlite_master|information_schema|sys\.tables|SHOW\s+TABLES)")
-| stats count by src_ip url
+index=main sourcetype=*
+| search _raw="*sqlite_master*" OR _raw="*information_schema*" OR _raw="*sys.tables*" OR _raw="*SHOW TABLES*"
+| table _time src_ip dest_ip url _raw
+| sort -_time
 ```
 
 ```spl
-index=main sourcetype="suricata" status>=400
-| where match(response, "(?i)(sql|database|syntax|mysql|sqlite|oracle)")
-| stats count by src_ip status response
+index=main sourcetype=* status>=400
+| search _raw="*sql*" OR _raw="*database*" OR _raw="*syntax*" OR _raw="*mysql*" OR _raw="*sqlite*" OR _raw="*oracle*"
+| table _time src_ip dest_ip url status response* _raw
+| sort -_time
 ```
 
 ### XSS Detection
