@@ -127,9 +127,9 @@ defaultGroup=my_indexers
 server={splunk_server_ip}:9997
 """
     cmds = [
-        f"echo '{inputs_conf}' | sudo tee /opt/splunkforwarder/etc/system/local/inputs.conf > /dev/null",
-        f"echo '{outputs_conf}' | sudo tee /opt/splunkforwarder/etc/system/local/outputs.conf > /dev/null",
-        "sudo /opt/splunkforwarder/bin/splunk restart"
+        f"echo '{inputs_conf}' | tee /opt/splunkforwarder/etc/system/local/inputs.conf > /dev/null",
+        f"echo '{outputs_conf}' | tee /opt/splunkforwarder/etc/system/local/outputs.conf > /dev/null",
+        "/opt/splunkforwarder/bin/splunk restart"
     ]
     # This SSH command is run from your admin/management machine to pfSense
     ssh_and_run(pfsense_ip, pfsense_user, pfsense_pass, cmds)
