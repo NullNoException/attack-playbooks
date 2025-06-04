@@ -1,0 +1,97 @@
+version: '2'
+
+services:
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    container_name: dvwa
+    ports:
+      - "8080:80"
+    environment:
+      - MYSQL_RANDOM_ROOT_PASSWORD=yes
+    volumes:
+      - dvwa_data:/var/lib/mysql
+    restart: unless-stopped
+    networks:
+      - vulnnet
+    platform: linux/amd64 # Specify platform for Intel/AMD compatibility on ARM systems
+
+  xvwa:
+    image: citizenstig/nowasp:latest
+    container_name: mutillidae
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    networks:
+      - vulnnet
+    platform: linux/amd64 # Specify platform for Intel/AMD compatibility on ARM systems
+
+  webgoat:
+    image: webgoat/webgoat:latest
+    container_name: webgoat
+    ports:
+      - "8082:8080"
+      - "8083:9090"
+    environment:
+      - WEBGOAT_HOST=0.0.0.0
+      - WEBWOLF_HOST=0.0.0.0
+    restart: unless-stopped
+    networks:
+      - vulnnet
+
+  juiceshop:
+    image: bkimminich/juice-shop:latest
+    container_name: juiceshop
+    ports:
+      - "8084:3000"
+    restart: unless-stopped
+    networks:
+      - vulnnet
+
+  # Metasploitable 2 for comprehensive pentesting targets
+  metasploitable:
+    image: tleemcjr/metasploitable2:latest
+    container_name: metasploitable
+    ports:
+      # SSH for brute force testing
+      - "2222:22"
+      # Telnet
+      - "2323:23"
+      # FTP
+      - "2121:21"
+      # Web Services
+      - "8085:80"
+      - "8443:443"
+      # MySQL
+      - "3306:3306"
+      # PostgreSQL
+      - "5432:5432"
+      # SMTP/POP3/IMAP
+      - "2525:25"
+      - "1100:110"
+      - "1430:143"
+      # RPC/NFS
+      - "1110:111"
+      - "2049:2049"
+      # IRC
+      - "6667:6667"
+      # VNC
+      - "5900:5900"
+      # Samba
+      - "139:139"
+      - "445:445"
+    networks:
+      - vulnnet
+    platform: linux/amd64  # Metasploitable 2 needs x86_64 architecture
+    restart: unless-stopped
+    # Capabilities needed for proper operation
+    cap_add:
+      - NET_ADMIN
+    security_opt:
+      - seccomp:unconfined
+
+networks:
+  vulnnet:
+    driver: bridge
+
+volumes:
+  dvwa_data:
