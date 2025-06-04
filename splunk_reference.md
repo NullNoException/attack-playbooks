@@ -11,7 +11,7 @@ This reference provides step-by-step Splunk queries for identifying and classify
 ```splunk
 index=web_logs sourcetype=access_combined
 | search method IN ("HEAD", "OPTIONS")
-| stats count by src_ip, dest_ip, uri, user_agent
+| stats count by src_ip, dest_ip, uri, http_user_agent
 | where count > 10
 | eval attack_type="Recon: HTTP Method Enumeration"
 ```
@@ -20,7 +20,7 @@ index=web_logs sourcetype=access_combined
 
 ```splunk
 index=web_logs sourcetype=access_combined
-| search status=404
+| search http.status=404
 | stats count by src_ip, uri
 | where count > 20
 | eval attack_type="Recon: Directory Brute Force"
@@ -30,8 +30,8 @@ index=web_logs sourcetype=access_combined
 
 ```splunk
 index=web_logs sourcetype=access_combined
-| regex user_agent="(nmap|nikto|whatweb|wpscan|dirb|gobuster|sqlmap|masscan|curl|wget)"
-| stats count by src_ip, user_agent
+| regex http_user_agent="(nmap|nikto|whatweb|wpscan|dirb|gobuster|sqlmap|masscan|curl|wget)"
+| stats count by src_ip, http_user_agent
 | eval attack_type="Recon: Automated Scanner Detected"
 ```
 
@@ -224,7 +224,7 @@ index=os_logs sourcetype=WinEventLog:Security
 
 ```splunk
 index=web_logs sourcetype=access_combined
-| search uri="/login" status=401
+| search uri="/login" http.status=401
 | stats count by src_ip
 | where count > 10
 | eval attack_type="Brute Force: Web Login"
@@ -234,7 +234,7 @@ index=web_logs sourcetype=access_combined
 
 ```splunk
 index=os_logs sourcetype=auth
-| search command="ssh" status="failed"
+| search command="ssh" http.status="failed"
 | stats count by src_ip
 | where count > 10
 | eval attack_type="Brute Force: SSH Login"
